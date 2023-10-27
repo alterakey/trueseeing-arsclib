@@ -171,7 +171,7 @@ public class KXmlSerializer implements XmlSerializer {
                         writeSurrogate(c, s.charAt(i + 1));
                         ++i;
                     } else {
-                        reportInvalidCharacter(c);
+			append("&#" + ((int) c) + ";");
                     }
             }
         }
