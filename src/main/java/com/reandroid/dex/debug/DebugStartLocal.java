@@ -15,27 +15,36 @@
  */
 package com.reandroid.dex.debug;
 
-import com.reandroid.dex.index.StringId;
-import com.reandroid.dex.item.StringData;
-import com.reandroid.dex.index.TypeId;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.id.StringId;
+import com.reandroid.dex.id.TypeId;
+import com.reandroid.dex.key.StringKey;
+import com.reandroid.dex.key.TypeKey;
+import com.reandroid.dex.reference.Base1Ule128IdItemReference;
 import com.reandroid.dex.sections.SectionType;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliDebug;
+import com.reandroid.dex.smali.model.SmaliDebugLocal;
+import com.reandroid.utils.collection.CombiningIterator;
+import com.reandroid.utils.collection.SingleIterator;
 
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.Objects;
 
 public class DebugStartLocal extends DebugRegisterNumber {
 
-    private final Base1Ule128Item<StringId> nameIndex;
-    private final Base1Ule128Item<TypeId> typeIndex;
+    private final Base1Ule128IdItemReference<StringId> mName;
+    private final Base1Ule128IdItemReference<TypeId> mType;
 
     DebugStartLocal(int childesCount, int flag) {
         super(childesCount + 2, flag);
 
-        this.nameIndex = new Base1Ule128Item<>(SectionType.STRING_ID);
-        this.typeIndex = new Base1Ule128Item<>(SectionType.TYPE_ID);
+        this.mName = new Base1Ule128IdItemReference<>(SectionType.STRING_ID);
+        this.mType = new Base1Ule128IdItemReference<>(SectionType.TYPE_ID);
 
-        addChild(2, nameIndex);
-        addChild(3, typeIndex);
+        addChild(2, mName);
+        addChild(3, mType);
     }
     DebugStartLocal(int childesCount, DebugElementType<?> elementType) {
         this(childesCount, elementType.getFlag());
@@ -44,48 +53,113 @@ public class DebugStartLocal extends DebugRegisterNumber {
         this(0, DebugElementType.START_LOCAL.getFlag());
     }
 
-    public StringData getName(){
-        StringId stringId = nameIndex.getItem();
+    @Override
+    public boolean isValid(){
+        return mName.getItem() != null && mType.getItem() != null;
+    }
+    public String getName(){
+        StringId stringId = mName.getItem();
         if(stringId != null){
-            return stringId.getStringData();
+            return stringId.getString();
+        }
+        return null;
+    }
+    public StringKey getNameKey(){
+        return (StringKey) this.mName.getKey();
+    }
+    public void setName(String name){
+        this.setName(StringKey.create(name));
+    }
+    public void setName(StringKey key){
+        this.mName.setItem(key);
+    }
+    public String getType(){
+        TypeId typeId = mType.getItem();
+        if(typeId != null){
+            return typeId.getName();
         }
         return null;
     }
     public TypeId getTypeId(){
-        return typeIndex.getItem();
+        return mType.getItem();
+    }
+    public TypeKey getTypeKey(){
+        return (TypeKey) mType.getKey();
+    }
+    public void setType(String type){
+        this.mType.setItem(TypeKey.create(type));
+    }
+    public void setType(TypeKey typeKey){
+        this.mType.setItem(typeKey);
     }
 
+    @Override
     public void appendExtra(SmaliWriter writer) throws IOException {
-        writer.append(getElementType().getOpcode());
-        writer.append(" v");
-        writer.append(getRegisterNumber());
+        getSmaliDirective().append(writer);
+        writer.appendRegister(getRegisterNumber());
         writer.append(", ");
-        getName().append(writer);
+        this.mName.append(writer);
         writer.append(':');
-        getTypeId().append(writer);
+        this.mType.append(writer);
+    }
+
+    @Override
+    public DebugElementType<? extends DebugStartLocal> getElementType() {
+        return DebugElementType.START_LOCAL;
+    }
+
+
+    @Override
+    public Iterator<IdItem> usedIds(){
+        return CombiningIterator.two(SingleIterator.of(mName.getItem()),
+                SingleIterator.of(mType.getItem()));
+    }
+    @Override
+    public void merge(DebugElement element){
+        super.merge(element);
+        DebugStartLocal coming = (DebugStartLocal) element;
+        this.mName.setItem(coming.mName.getKey());
+        this.mType.setItem(coming.mType.getKey());
+    }
+
+    @Override
+    public void fromSmali(SmaliDebug smaliDebug) throws IOException {
+        super.fromSmali(smaliDebug);
+        SmaliDebugLocal smaliDebugLocal = (SmaliDebugLocal) smaliDebug;
+        setName(smaliDebugLocal.getName());
+        setType(smaliDebugLocal.getType());
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        DebugStartLocal debug = (DebugStartLocal) obj;
+        return getFlag() == debug.getFlag() &&
+                Objects.equals(getName(), debug.getName()) &&
+                Objects.equals(getType(), debug.getType());
+    }
+    @Override
+    public int hashCode() {
+        int hash = getFlag();
+        hash = hash * 31;
+        String text = getName();
+        if(text != null){
+            hash = hash + text.hashCode();
+        }
+        hash = hash * 31;
+        text = getType();
+        if(text != null){
+            hash = hash + text.hashCode();
+        }
+        return hash;
     }
     @Override
     public String toString() {
-        StringData stringData = getName();
-        TypeId typeId = getTypeId();
-        StringBuilder builder = new StringBuilder();
-        builder.append(super.toString());
-        builder.append(", ");
-        if(stringData == null){
-            builder.append("name index = ");
-            builder.append(nameIndex.get());
-        }else {
-            builder.append('"');
-            builder.append(stringData.getString());
-            builder.append('"');
-        }
-        builder.append(':');
-        if(typeId == null){
-            builder.append("type id = ");
-            builder.append(typeIndex.get());
-        }else {
-            builder.append(typeId.getName());
-        }
-        return builder.toString();
+        return super.toString() + ", " + mName + ':' + mType;
     }
 }

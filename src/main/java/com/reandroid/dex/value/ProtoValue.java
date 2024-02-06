@@ -15,13 +15,20 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.index.ProtoId;
+import com.reandroid.dex.id.ProtoId;
+import com.reandroid.dex.key.Key;
+import com.reandroid.dex.key.ProtoKey;
 import com.reandroid.dex.sections.SectionType;
 
 public class ProtoValue extends SectionIdValue<ProtoId> {
 
     public ProtoValue() {
         super(SectionType.PROTO_ID, DexValueType.PROTO);
+    }
+
+    @Override
+    public ProtoKey getKey() {
+        return (ProtoKey) super.getKey();
     }
 
     @Override

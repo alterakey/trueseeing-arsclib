@@ -16,6 +16,7 @@
 package com.reandroid.xml;
 
 import com.reandroid.utils.collection.CollectionUtil;
+import com.reandroid.xml.base.Document;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
 import org.xmlpull.v1.XmlSerializer;
@@ -23,7 +24,7 @@ import org.xmlpull.v1.XmlSerializer;
 import java.io.*;
 import java.util.Iterator;
 
-public class XMLDocument extends XMLNodeTree{
+public class XMLDocument extends XMLNodeTree implements Document<XMLElement> {
     private String encoding;
     private Boolean standalone;
     public XMLDocument(String elementName){
@@ -36,14 +37,14 @@ public class XMLDocument extends XMLNodeTree{
     }
 
     @Override
-    XMLDocument clone(XMLNode parent) {
+    XMLDocument newCopy(XMLNode parent) {
 
         XMLDocument document = new XMLDocument();
         document.encoding = encoding;
         document.standalone = standalone;
         Iterator<XMLNode> iterator = iterator();
         while(iterator.hasNext()){
-            iterator.next().clone(document);
+            iterator.next().newCopy(document);
         }
         return document;
     }
@@ -55,6 +56,14 @@ public class XMLDocument extends XMLNodeTree{
         clear();
         add(element);
     }
+
+    public void setEncoding(String encoding) {
+        this.encoding = encoding;
+    }
+    public void setStandalone(Boolean standalone) {
+        this.standalone = standalone;
+    }
+
     public void parse(XmlPullParser parser) throws XmlPullParserException, IOException {
         encoding = null;
         standalone = null;
@@ -113,6 +122,14 @@ public class XMLDocument extends XMLNodeTree{
     }
     @Override
     void endSerialize(XmlSerializer serializer) {
+        if(encoding == null){
+            return;
+        }
+        try {
+            serializer.endDocument();
+        } catch (IOException exception) {
+            exception.printStackTrace();
+        }
     }
     void appendDocument(Appendable appendable, boolean xml) throws IOException {
         if(encoding == null || !xml){
@@ -123,8 +140,9 @@ public class XMLDocument extends XMLNodeTree{
         appendable.append("'?>");
     }
     @Override
-    void write(Appendable writer, boolean xml, boolean escapeXmlText) throws IOException{
-
+    void write(Appendable appendable, boolean xml, boolean escapeXmlText) throws IOException{
+        appendDocument(appendable, xml);
+        getDocumentElement().write(appendable, xml, escapeXmlText);
     }
     @Override
     int appendDebugText(Appendable appendable, int limit, int length) throws IOException {

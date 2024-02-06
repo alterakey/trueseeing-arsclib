@@ -21,6 +21,109 @@ import java.util.List;
 
 public class StringsUtil {
 
+    public static final String EMPTY = ObjectsUtil.of("");
+
+    public static byte[] getASCII(String text){
+        int length = text.length();
+        byte[] results = new byte[length];
+        for(int i = 0; i < length; i++){
+            results[i] = (byte) text.charAt(i);
+        }
+        return results;
+    }
+    public static boolean isDigits(String text){
+        if(isEmpty(text)){
+            return false;
+        }
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            if(!isDigit(text.charAt(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+    public static boolean isAzOrDigitsOr(String text, char[] chars){
+        if(isEmpty(text)){
+            return false;
+        }
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            if(!isAzOrDigitsOr(text.charAt(i), chars)){
+                return false;
+            }
+        }
+        return true;
+    }
+    public static boolean isAzOrDigits(String text){
+        if(isEmpty(text)){
+            return false;
+        }
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            if(!isAzOrDigits(text.charAt(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+    public static boolean isAz(String text){
+        if(isEmpty(text)){
+            return false;
+        }
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            if(!isAz(text.charAt(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+    public static boolean isLowerAZ(String text){
+        if(isEmpty(text)){
+            return false;
+        }
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            if(!isLowerAZ(text.charAt(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+    public static boolean isUpperAZ(String text){
+        if(isEmpty(text)){
+            return false;
+        }
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            if(!isUpperAZ(text.charAt(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+    public static boolean isDigit(char ch){
+        return ch >= '0' && ch <= '9';
+    }
+    public static boolean isAz(char ch){
+        return ch >= 'A' && ch <= 'Z' ||
+                ch >= 'a' && ch <= 'z';
+    }
+    public static boolean isAzOrDigitsOr(char ch, char[] chars){
+        return isAzOrDigits(ch) || contains(chars, ch);
+    }
+    public static boolean isAzOrDigits(char ch){
+        return ch >= 'A' && ch <= 'Z' ||
+                ch >= 'a' && ch <= 'z'||
+                ch >= '0' && ch <= '9';
+    }
+    public static boolean isLowerAZ(char ch){
+        return ch >= 'a' && ch <= 'z';
+    }
+    public static boolean isUpperAZ(char ch){
+        return ch >= 'A' && ch <= 'Z';
+    }
     public static boolean isWhiteSpace(String text){
         return text == null || skipWhitespace(text) == text.length();
     }
@@ -85,8 +188,97 @@ public class StringsUtil {
         }
         return Integer.compare(length1, length2);
     }
+    public static String remove(String text, char[] search) {
+        if(text == null){
+            return null;
+        }
+        int length = text.length();
+        if(length == 0){
+            return null;
+        }
+        int count = countChar(text, search, false);
+        if(count == 0){
+            return text;
+        }
+        StringBuilder builder = new StringBuilder(length - count);
+        for(int i = 0; i < length; i++){
+            char ch = text.charAt(i);
+            if(!contains(search, ch)){
+                builder.append(ch);
+            }
+        }
+        if(builder.length() == 0){
+            return null;
+        }
+        return builder.toString();
+    }
+    public static String[] removeEmpty(String[] strings){
+        if(strings == null){
+            return null;
+        }
+        int length = strings.length;
+        if(length == 0){
+            return strings;
+        }
+        int count = 0;
+        for(int i = 0; i < length; i++){
+            if(isEmpty(strings[i])){
+                strings[i] = null;
+            }else {
+                count ++;
+            }
+        }
+        if(count == length){
+            return strings;
+        }
+        String[] results = new String[count];
+        int index = 0;
+        for(int i = 0; i < length; i++){
+            String str = strings[i];
+            if(str != null){
+                results[index] = str;
+                index ++;
+            }
+        }
+        return results;
+    }
     public static String[] split(String text, char search){
         return split(text, search, true);
+    }
+    public static String[] split(String text, char[] search){
+        return split(text, search, true);
+    }
+    public static String[] split(String text, char[] search, boolean skipConsecutive) {
+        if(text == null || text.length() == 0){
+            return new String[0];
+        }
+        int count = countChar(text, search, skipConsecutive);
+        if(count == 0){
+            return new String[]{text};
+        }
+        String[] results = new String[count + 1];
+        int index = 0;
+        StringBuilder builder = new StringBuilder();
+        boolean previousMatch = false;
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            char ch = text.charAt(i);
+            if(contains(search, ch)){
+                if(!previousMatch || !skipConsecutive){
+                    previousMatch = true;
+                    results[index] = builder.toString();
+                    builder = new StringBuilder();
+                    index++;
+                }
+            }else {
+                previousMatch = false;
+                builder.append(ch);
+            }
+        }
+        if(index < results.length){
+            results[index] = builder.toString();
+        }
+        return results;
     }
     public static String[] split(String text, char search, boolean skipConsecutive) {
         if(text == null || text.length() == 0){
@@ -99,9 +291,10 @@ public class StringsUtil {
         String[] results = new String[count + 1];
         int index = 0;
         StringBuilder builder = new StringBuilder();
-        char[] chars = text.toCharArray();
         boolean previousMatch = false;
-        for(char ch : chars){
+        int length = text.length();
+        for(int i = 0; i < length; i++){
+            char ch = text.charAt(i);
             if(ch == search){
                 if(!previousMatch || !skipConsecutive){
                     previousMatch = true;
@@ -119,14 +312,35 @@ public class StringsUtil {
         }
         return results;
     }
+    public static int countChar(String text, char[] search, boolean skipConsecutive) {
+        if(text == null || text.length() == 0){
+            return 0;
+        }
+        int length = text.length();
+        int result = 0;
+        boolean previousMatch = false;
+        for(int i = 0; i < length; i++){
+            char ch = text.charAt(i);
+            if(contains(search, ch)){
+                if(!previousMatch || !skipConsecutive){
+                    result ++;
+                    previousMatch = true;
+                }
+            }else {
+                previousMatch = false;
+            }
+        }
+        return result;
+    }
     public static int countChar(String text, char search, boolean skipConsecutive) {
         if(text == null || text.length() == 0){
             return 0;
         }
-        char[] chars = text.toCharArray();
+        int length = text.length();
         int result = 0;
         boolean previousMatch = false;
-        for(char ch : chars){
+        for(int i = 0; i < length; i++){
+            char ch = text.charAt(i);
             if(ch == search){
                 if(!previousMatch || !skipConsecutive){
                     result ++;
@@ -137,6 +351,15 @@ public class StringsUtil {
             }
         }
         return result;
+    }
+
+    private static boolean contains(char[] chars, char ch){
+        for(char c : chars){
+            if(c == ch){
+                return true;
+            }
+        }
+        return false;
     }
 
     public static String toString(Collection<?> collection){
@@ -315,6 +538,10 @@ public class StringsUtil {
     }
     public static int compareStrings(String s1, String s2) {
         return CompareUtil.compare(s1, s2);
+    }
+
+    public static String of(String s){
+        return s;
     }
 
     private static final int MAX_STRING_APPEND = 5;

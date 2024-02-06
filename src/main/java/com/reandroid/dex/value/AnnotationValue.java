@@ -1,7 +1,9 @@
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.item.AnnotationItem;
-import com.reandroid.dex.key.AnnotationKey;
+import com.reandroid.dex.data.AnnotationItem;
+import com.reandroid.dex.key.DataKey;
+import com.reandroid.dex.smali.model.SmaliValue;
+import com.reandroid.dex.smali.model.SmaliValueAnnotation;
 
 public class AnnotationValue extends DexValueBlock<AnnotationItem> {
 
@@ -11,12 +13,8 @@ public class AnnotationValue extends DexValueBlock<AnnotationItem> {
     public AnnotationItem get(){
         return getValueContainer();
     }
-    public AnnotationKey getKey(){
-        AnnotationItem item = get();
-        if(item != null){
-            return item.getKey();
-        }
-        return null;
+    public DataKey<AnnotationItem> getKey(){
+        return get().getKey();
     }
 
     @Override
@@ -25,10 +23,22 @@ public class AnnotationValue extends DexValueBlock<AnnotationItem> {
     }
     @Override
     public String getAsString() {
-        AnnotationKey key = getKey();
-        if(key != null){
-            return key.toString();
-        }
-        return null;
+        return get().toString();
+    }
+    @Override
+    public void merge(DexValueBlock<?> valueBlock){
+        super.merge(valueBlock);
+        AnnotationValue value = (AnnotationValue) valueBlock;
+        AnnotationItem coming = value.get();
+        AnnotationItem item = get();
+        item.setType(coming.getTypeKey());
+        item.merge(coming);
+    }
+
+    @Override
+    public void fromSmali(SmaliValue smaliValue) {
+        SmaliValueAnnotation smaliValueAnnotation = (SmaliValueAnnotation) smaliValue;
+        AnnotationItem annotationItem = get();
+        annotationItem.fromSmali(smaliValueAnnotation.getValue());
     }
 }

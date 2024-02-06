@@ -15,9 +15,11 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.common.DexUtils;
-import com.reandroid.dex.index.StringId;
-import com.reandroid.dex.item.StringData;
+import com.reandroid.dex.base.UsageMarker;
+import com.reandroid.dex.data.AnnotationItem;
+import com.reandroid.dex.id.StringId;
+import com.reandroid.dex.key.StringKey;
+import com.reandroid.dex.key.TypeKey;
 import com.reandroid.dex.sections.SectionType;
 
 public class StringValue extends SectionIdValue<StringId> {
@@ -27,29 +29,37 @@ public class StringValue extends SectionIdValue<StringId> {
     }
 
     @Override
-    public DexValueType<?> getValueType() {
-        return DexValueType.STRING;
-    }
-    public StringData getStringData(){
-        StringId stringId = get();
-        if(stringId != null) {
-            return stringId.getStringData();
-        }
-        return null;
+    public StringKey getKey() {
+        return (StringKey) super.getKey();
     }
     public String getString() {
-        StringData stringData = getStringData();
-        if(stringData != null) {
-            return stringData.getString();
+        StringKey stringKey = getKey();
+        if(stringKey != null) {
+            return stringKey.getString();
         }
         return null;
     }
+    public void setString(String value){
+        setKey(StringKey.create(value));
+    }
+
     @Override
-    public String getAsString() {
-        StringData stringData = getStringData();
-        if(stringData != null) {
-            return DexUtils.quoteString(stringData.getString());
+    void updateUsageType(StringId stringId) {
+        super.updateUsageType(stringId);
+        if(stringId != null &&
+                stringId.containsUsage(UsageMarker.USAGE_ANNOTATION) &&
+                !stringId.containsUsage(UsageMarker.USAGE_SIGNATURE_TYPE)) {
+
+            AnnotationItem annotationItem = getParentInstance(AnnotationItem.class);
+            if(annotationItem != null &&
+                    TypeKey.DALVIK_Signature.equals(annotationItem.getTypeKey())){
+                stringId.addUsageType(UsageMarker.USAGE_SIGNATURE_TYPE);
+            }
         }
-        return null;
+    }
+
+    @Override
+    public DexValueType<?> getValueType() {
+        return DexValueType.STRING;
     }
 }

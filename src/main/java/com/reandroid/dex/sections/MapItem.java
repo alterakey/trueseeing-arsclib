@@ -16,8 +16,12 @@
 package com.reandroid.dex.sections;
 
 import com.reandroid.arsc.base.Block;
+import com.reandroid.arsc.item.IndirectInteger;
 import com.reandroid.arsc.item.IntegerReference;
 import com.reandroid.dex.base.*;
+import com.reandroid.dex.common.SectionItem;
+import com.reandroid.dex.header.CountAndOffset;
+import com.reandroid.dex.header.DexHeader;
 import com.reandroid.utils.HexUtil;
 
 public class MapItem extends DexBlockItem {
@@ -30,27 +34,38 @@ public class MapItem extends DexBlockItem {
         this.countAndOffset = new ParallelIntegerPair(new IndirectIntegerPair(this, 4));
     }
 
+    public void link(DexHeader header){
+        CountAndOffset headerCountAndOffset = header.get(getSectionType());
+        if(headerCountAndOffset != null){
+            getCountAndOffset().setReference2(headerCountAndOffset);
+        }
+    }
     public ParallelIntegerPair getCountAndOffset() {
         return countAndOffset;
     }
-    public<T1 extends Block> SectionType<T1> getMapType(){
+    public<T1 extends SectionItem> SectionType<T1> getSectionType(){
         return SectionType.get(getType().get());
     }
 
-    public<T1 extends Block> Section<T1> createNewSection(){
-        SectionType<T1> sectionType = getMapType();
-        if(sectionType == null || sectionType.getCreator() == null){
+    public<T1 extends SectionItem> Section<T1> createNewSection(){
+        SectionType<T1> sectionType = getSectionType();
+        if(sectionType == null){
+            System.err.println("Unknown section: " + toString());
             return null;
         }
-        Block parent = getParentInstance(SectionList.class);
+        if(sectionType.getCreator() == null){
+            System.err.println("Unimplemented section: " + toString());
+            return null;
+        }
+        Block parent = getParent(SectionList.class);
         if(parent != null){
             parent = parent.getParent();
         }
         if(parent == null){
-            parent = getParentInstance(MapList.class);
+            parent = getParent(MapList.class);
         }
         if(parent == null){
-            parent = getParentInstance(DexFileBlock.class);
+            parent = getParent(DexLayout.class);
         }
         if(parent == null){
             parent = getParent();
@@ -88,7 +103,7 @@ public class MapItem extends DexBlockItem {
     @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
-        SectionType<?> sectionType = getMapType();
+        SectionType<?> sectionType = getSectionType();
         String name;
         if(sectionType == null){
             name = HexUtil.toHex("UNKNOWN_", getType().get(), 1);

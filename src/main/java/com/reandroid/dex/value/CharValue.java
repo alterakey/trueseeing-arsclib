@@ -16,7 +16,9 @@
 package com.reandroid.dex.value;
 
 import com.reandroid.dex.common.DexUtils;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliValue;
+import com.reandroid.dex.smali.model.SmaliValueChar;
 import com.reandroid.utils.HexUtil;
 
 import java.io.IOException;
@@ -31,7 +33,7 @@ public class CharValue extends PrimitiveValue {
         return (char) getNumberValue();
     }
     public void set(char ch){
-        setNumberValue(ch);
+        setNumberValue(0x0000ffff & ch);
     }
     @Override
     public DexValueType<?> getValueType() {
@@ -45,6 +47,12 @@ public class CharValue extends PrimitiveValue {
     @Override
     public String getAsString() {
         return DexUtils.quoteChar(get());
+    }
+
+    @Override
+    public void fromSmali(SmaliValue smaliValue) {
+        SmaliValueChar smaliValueChar = (SmaliValueChar) smaliValue;
+        set(smaliValueChar.getValue());
     }
 
     @Override

@@ -20,36 +20,53 @@ import com.reandroid.arsc.base.BlockCounter;
 import com.reandroid.arsc.container.BlockList;
 import com.reandroid.arsc.io.BlockReader;
 import com.reandroid.dex.base.Sle128Item;
-import com.reandroid.dex.item.DexContainerItem;
+import com.reandroid.dex.data.FixedDexContainerWithTool;
+import com.reandroid.dex.data.InstructionList;
+import com.reandroid.dex.smali.model.SmaliCodeCatch;
+import com.reandroid.dex.smali.model.SmaliCodeCatchAll;
+import com.reandroid.dex.smali.model.SmaliCodeTryItem;
+import com.reandroid.dex.smali.model.SmaliSet;
 import com.reandroid.utils.collection.*;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.function.Function;
 
-public class TryItem extends DexContainerItem implements Iterable<Label>{
+public class TryItem extends FixedDexContainerWithTool implements Iterable<Label>{
     private final HandlerOffsetArray handlerOffsetArray;
 
-    private final Sle128Item handlersCount;
-    private final BlockList<TryHandler> tryHandlerList;
+    final Sle128Item handlersCount;
+    private final BlockList<CatchTypedHandler> catchTypedHandlerList;
     private CatchAllHandler catchAllHandler;
 
     public TryItem(HandlerOffsetArray handlerOffsetArray) {
         super(3);
+
         this.handlerOffsetArray = handlerOffsetArray;
         this.handlersCount = new Sle128Item();
-        this.tryHandlerList = new BlockList<>();
+        this.catchTypedHandlerList = new BlockList<>();
 
         addChild(0, handlersCount);
-        addChild(1, tryHandlerList);
+        addChild(1, catchTypedHandlerList);
     }
     private TryItem() {
         super(0);
         this.handlerOffsetArray = null;
 
         this.handlersCount = null;
-        this.tryHandlerList = null;
+        this.catchTypedHandlerList = null;
+    }
+
+    public boolean isCopy(){
+        return false;
+    }
+    InstructionList getInstructionList(){
+        return getTryBlock().getInstructionList();
+    }
+    TryBlock getTryBlock(){
+        return getParent(TryBlock.class);
     }
 
     TryItem newCopy(){
@@ -58,20 +75,31 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
     HandlerOffset getHandlerOffset() {
         return getHandlerOffsetArray().get(getIndex());
     }
+    HandlerOffset getOrCreateHandlerOffset() {
+        return getHandlerOffsetArray().getOrCreate(getIndex());
+    }
     HandlerOffsetArray getHandlerOffsetArray(){
         return handlerOffsetArray;
     }
-    BlockList<TryHandler> getTryHandlerBlockList(){
-        return tryHandlerList;
+    BlockList<CatchTypedHandler> getCatchTypedHandlerBlockList(){
+        return catchTypedHandlerList;
     }
-    Iterator<TryHandler> getTryHandlers(){
-        return tryHandlerList.iterator();
-    }
-    Sle128Item getHandlersCountItem(){
-        return handlersCount;
+    Iterator<CatchTypedHandler> getCatchTypedHandlers(){
+        return catchTypedHandlerList.iterator();
     }
     TryItem getTryItem(){
         return this;
+    }
+    void updateCount(){
+        Sle128Item handlersCount = this.handlersCount;
+        if(handlersCount == null){
+            return;
+        }
+        int count = catchTypedHandlerList.size();
+        if(hasCatchAllHandler()){
+            count = -count;
+        }
+        handlersCount.set(count);
     }
 
     @Override
@@ -84,7 +112,7 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
         if(handler != null){
             iterator1 = SingleIterator.of(handler);
         }
-        return new CombiningIterator<>(getTryHandlers(), iterator1);
+        return new CombiningIterator<>(getCatchTypedHandlers(), iterator1);
     }
     public int getStartAddress(){
         return getHandlerOffset().getStartAddress();
@@ -96,6 +124,9 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
         return getHandlerOffset().getCatchCodeUnit();
     }
 
+    public boolean hasCatchAllHandler(){
+        return getCatchAllHandler() != null;
+    }
     public CatchAllHandler getCatchAllHandler(){
         return catchAllHandler;
     }
@@ -110,6 +141,12 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
     }
 
     @Override
+    protected void onRefreshed() {
+        super.onRefreshed();
+        updateCount();
+    }
+
+    @Override
     public void onReadBytes(BlockReader reader) throws IOException {
         int maxPosition = reader.getPosition();
 
@@ -117,17 +154,17 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
         int position = handlerOffsetArray.getItemsStart()
                 + handlerOffsetArray.getOffset(this.getIndex());
         reader.seek(position);
-        Sle128Item countItem = getHandlersCountItem();
-        countItem.readBytes(reader);
-        int count = countItem.get();
+        this.handlersCount.readBytes(reader);
+        int count = this.handlersCount.get();
         boolean hasCatchAll = false;
         if(count <= 0){
             count = -count;
             hasCatchAll = true;
         }
-        BlockList<TryHandler> handlerList = this.getTryHandlerBlockList();
+        BlockList<CatchTypedHandler> handlerList = this.getCatchTypedHandlerBlockList();
+        handlerList.ensureCapacity(count);
         for(int i = 0; i < count; i++){
-            TryHandler handler = new TryHandler();
+            CatchTypedHandler handler = new CatchTypedHandler();
             handlerList.add(handler);
             handler.readBytes(reader);
         }
@@ -135,8 +172,10 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
             initCatchAllHandler().readBytes(reader);
         }
         if(maxPosition > reader.getPosition()){
+            // Should never reach here
             reader.seek(maxPosition);
         }
+
     }
     @Override
     public void onCountUpTo(BlockCounter counter) {
@@ -152,6 +191,99 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
             }
         }
         super.onCountUpTo(counter);
+    }
+    public void onRemove(){
+        BlockList<CatchTypedHandler> list = this.catchTypedHandlerList;
+        if(list != null){
+            int size = list.size();
+            for(int i = 0; i < size; i++){
+                CatchTypedHandler handler = list.get(i);
+                handler.onRemove();
+                handler.setParent(null);
+            }
+            list.destroy();
+        }
+        CatchAllHandler handler = this.catchAllHandler;
+        if(handler != null){
+            handler.onRemove();
+            this.catchAllHandler = null;
+        }
+    }
+    public void merge(TryItem tryItem){
+        mergeOffset(tryItem);
+        mergeHandlers(tryItem);
+    }
+    void mergeHandlers(TryItem tryItem){
+        BlockList<CatchTypedHandler> comingList = tryItem.getCatchTypedHandlerBlockList();
+        int size = comingList.size();
+        BlockList<CatchTypedHandler> handlerList = this.getCatchTypedHandlerBlockList();
+        handlerList.ensureCapacity(size);
+        for (int i = 0; i < size; i++){
+            CatchTypedHandler coming = comingList.get(i);
+            CatchTypedHandler handler = new CatchTypedHandler();
+            handlerList.add(handler);
+            handler.merge(coming);
+        }
+        if(tryItem.hasCatchAllHandler()){
+            initCatchAllHandler().merge(tryItem.getCatchAllHandler());
+        }
+        updateCount();
+    }
+    void mergeOffset(TryItem tryItem){
+
+        HandlerOffset coming = tryItem.getHandlerOffset();
+        HandlerOffset handlerOffset = getOrCreateHandlerOffset();
+
+        handlerOffset.setCatchCodeUnit(coming.getCatchCodeUnit());
+        handlerOffset.setStartAddress(coming.getStartAddress());
+    }
+    public void fromSmali(SmaliCodeTryItem smaliCodeTryItem){
+        setStartAddress(smaliCodeTryItem.getStartAddress());
+        SmaliSet<SmaliCodeCatch> smaliCodeCatchSet = smaliCodeTryItem.getCatchSet();
+
+        BlockList<CatchTypedHandler> handlerList = this.getCatchTypedHandlerBlockList();
+        int size = smaliCodeCatchSet.size();
+        for(int i = 0; i < size; i++){
+            SmaliCodeCatch smaliCodeCatch = smaliCodeCatchSet.get(i);
+            CatchTypedHandler handler = new CatchTypedHandler();
+            handlerList.add(handler);
+            handler.fromSmali(smaliCodeCatch);
+        }
+        SmaliCodeCatchAll smaliCodeCatchAll = smaliCodeTryItem.getCatchAll();
+        if(smaliCodeCatchAll != null){
+            CatchAllHandler catchAllHandler = initCatchAllHandler();
+            catchAllHandler.fromSmali(smaliCodeCatchAll);
+        }
+        updateCount();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        TryItem tryItem = (TryItem) obj;
+        return Objects.equals(catchTypedHandlerList, tryItem.catchTypedHandlerList) &&
+                Objects.equals(catchAllHandler, tryItem.catchAllHandler);
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 1;
+        hash = hash * 31;
+        Object obj = catchTypedHandlerList;
+        if(obj != null){
+            hash = hash * 31 + obj.hashCode();
+        }
+        hash = hash * 31;
+        obj = catchAllHandler;
+        if(obj != null){
+            hash = hash * 31 + obj.hashCode();
+        }
+        return hash;
     }
 
     @Override
@@ -172,6 +304,16 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
             super();
             this.tryItem = tryItem;
         }
+
+        @Override
+        public boolean isCopy(){
+            return true;
+        }
+        @Override
+        TryBlock getTryBlock() {
+            return tryItem.getTryBlock();
+        }
+
         @Override
         TryItem newCopy() {
             return tryItem.newCopy();
@@ -181,19 +323,15 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
             return tryItem.getHandlerOffsetArray();
         }
         @Override
-        Iterator<TryHandler> getTryHandlers(){
-            return ComputeIterator.of(tryItem.getTryHandlers(), new Function<TryHandler, TryHandler>() {
+        Iterator<CatchTypedHandler> getCatchTypedHandlers(){
+            return ComputeIterator.of(tryItem.getCatchTypedHandlers(), new Function<CatchTypedHandler, CatchTypedHandler>() {
                 @Override
-                public TryHandler apply(TryHandler tryHandler) {
-                    TryHandler copy = tryHandler.newCopy();
+                public CatchTypedHandler apply(CatchTypedHandler catchTypedHandler) {
+                    CatchTypedHandler copy = catchTypedHandler.newCopy();
                     copy.setParent(Copy.this);
                     return copy;
                 }
             });
-        }
-        @Override
-        Sle128Item getHandlersCountItem(){
-            return tryItem.getHandlersCountItem();
         }
         @Override
         TryItem getTryItem(){
@@ -231,6 +369,12 @@ public class TryItem extends DexContainerItem implements Iterable<Label>{
 
         @Override
         public void onReadBytes(BlockReader reader) throws IOException {
+        }
+        @Override
+        void updateCount(){
+        }
+        @Override
+        void mergeHandlers(TryItem tryItem){
         }
     }
 }

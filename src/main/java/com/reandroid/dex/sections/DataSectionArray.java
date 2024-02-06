@@ -17,35 +17,49 @@ package com.reandroid.dex.sections;
 
 import com.reandroid.arsc.base.Creator;
 import com.reandroid.arsc.io.BlockReader;
-import com.reandroid.dex.base.DexPositionAlign;
+import com.reandroid.arsc.item.IntegerReference;
 import com.reandroid.dex.base.IntegerPair;
-import com.reandroid.dex.base.PositionAlignedItem;
-import com.reandroid.dex.item.DataSectionEntry;
+import com.reandroid.dex.data.DataItem;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
 
-public class DataSectionArray<T extends DataSectionEntry> extends SectionArray<T> {
+public class DataSectionArray<T extends DataItem> extends SectionArray<T> {
 
-    private Map<Integer, T> offsetMap = new HashMap<>();
+    private int mStart;
+    private int mEnd;
 
     public DataSectionArray(IntegerPair countAndOffset, Creator<T> creator) {
         super(countAndOffset, creator);
     }
 
-
     @Override
-    public void onPreRemove(T item) {
-        super.onPreRemove(item);
-        unRegisterOffset(item);
+    public void onChanged() {
+        super.onChanged();
+        mStart = 0;
     }
 
     public T getAt(int offset){
-        T item = offsetMap.get(offset);
-        if(item != null && item.getParent() == null){
-            offsetMap.remove(offset);
-            item = null;
+        if(offset <= 0){
+            return null;
+        }
+        int start = this.mStart;
+        if(start == 0 || offset < start || offset > mEnd){
+            updateBounds();
+        }
+        return getAt(offset, estimateBeginPosition(offset));
+    }
+    public T getAt(int offset, int indexHint){
+        if(offset <= 0){
+            return null;
+        }
+        T item = spiderSearch(offset, indexHint);
+        if(item != null){
+            return item;
+        }
+        //should not reach here
+        item = lazySearch(offset);
+        if(item != null){
+            updateBounds();
         }
         return item;
     }
@@ -54,80 +68,132 @@ public class DataSectionArray<T extends DataSectionEntry> extends SectionArray<T
             return null;
         }
         int length = offsets.length;
-        T[] results = newInstance(offsets.length);
+        T[] results = this.newArrayInstance(offsets.length);
         for(int i = 0; i < length; i++){
             results[i] = getAt(offsets[i]);
         }
         return results;
     }
+    @Override
+    public void readChild(BlockReader reader, T item) throws IOException {
+        int offset = reader.getPosition();
+        item.setPosition(offset);
+        item.onReadBytes(reader);
+    }
 
     @Override
-    protected void readChildes(BlockReader reader) throws IOException {
-        T[] childes = getChildes();
-        clearOffsetMap();
-        int length = childes.length;
-        for(int i = 0; i < length; i++){
-            T item = childes[i];
-            int offset = reader.getPosition();
-            setReadPosition(item, offset);
-            registerOffset(item, offset);
-            item.onReadBytes(reader);
+    public void onPreRemove(T item) {
+        super.onPreRemove(item);
+        IntegerReference reference = item.getOffsetReference();
+        if(reference != null){
+            reference.set(0);
         }
-    }
-    void setReadPosition(T item, int offset){
-        item.setPosition(offset);
     }
 
-    private void unRegisterOffset(T item){
-        if (item == null) {
-            return;
-        }
-        Integer offset = item.getOffset();
-        T exist = this.offsetMap.get(offset);
-        if(exist == item){
-            this.offsetMap.remove(offset);
-        }
-    }
-    void registerOffset(T item){
-        if (item == null) {
-            return;
-        }
-        int offset = item.getOffset();
-        registerOffset(item, offset);
-    }
-    private void registerOffset(T item, int offset){
-        offsetMap.put(offset, item);
-    }
-    private void clearOffsetMap(){
-        offsetMap = new HashMap<>(getCount());
-    }
-    int updateItemOffsets(int position){
-        int count = this.getCount();
-        this.getCountAndOffset().getFirst().set(count);
-        DexPositionAlign previous = null;
-        for(int i = 0; i < count; i++){
-            T item = this.get(i);
-            if(item == null) {
-                previous = null;
-                continue;
+    private T lazySearch(int offset){
+        int size = size();
+        for(int i = 0; i < size; i++){
+            T item = get(i);
+            if(offset == item.getOffset()){
+                return item;
             }
-            DexPositionAlign itemAlign = null;
-            if(item instanceof PositionAlignedItem){
-                itemAlign = ((PositionAlignedItem) item).getPositionAlign();
-                itemAlign.setSize(0);
-                if(previous != null){
-                    previous.align(position);
-                    position += previous.size();
+        }
+        return null;
+    }
+    private T spiderSearch(int offset, int beginIndex){
+        int size = size();
+        int i = beginIndex;
+        boolean lookBack = false;
+        boolean lookFront = false;
+        boolean lookChanged = false;
+        int step = 1;
+        int acceleration = 1;
+        while (true){
+            if(i < 0 || i >= size){
+                return null;
+            }
+            T item = get(i);
+            int itemOffset = item.getOffset();
+            if(itemOffset == offset){
+                return item;
+            }
+            if(offset < itemOffset){
+                if(lookFront){
+                    if(lookChanged){
+                        return null;
+                    }
+                    lookChanged = true;
+                    lookFront = false;
+                    step = 1;
+                }else if(lookBack && i == 0){
+                    return null;
+                }
+                if(!lookChanged){
+                    int remain = i/3 + 1;
+                    if(step > remain){
+                        step = remain;
+                    }
+                }
+                lookBack = true;
+                i = i - step;
+                if(i < 0){
+                    i = 0;
+                }
+            }else {
+                if(lookBack){
+                    if(lookChanged){
+                        return null;
+                    }
+                    lookBack = false;
+                    lookChanged = true;
+                    step = 1;
+                }
+                if(!lookChanged){
+                    int remain = (size - i)/3 + 1;
+                    if(step > remain){
+                        step = remain;
+                    }
+                }
+                lookFront = true;
+                i = i + step;
+            }
+            if(!lookChanged){
+                step += acceleration + 1;
+                if(step % 2 == 1){
+                    acceleration ++;
                 }
             }
-            if(i == count-1){
-                item.removeLastAlign();
-            }
-            item.setPosition(position);
-            registerOffset(item, position);
-            position += item.countBytes();
-            previous = itemAlign;
         }
-        return position;
+    }
+    private int estimateBeginPosition(int offset){
+        int bytes = mEnd - mStart;
+        if(bytes == 0){
+            bytes = 1;
+        }
+        int offsetDiff = offset - mStart;
+        long result = (long) offsetDiff * size();
+        result = result / bytes;
+        int index = (int) result;
+        index = index - 1;
+        int size = size();
+        if(index >= size){
+            index = size - 1;
+        }
+        if(index < 0){
+            index = 0;
+        }
+        return index;
+    }
+    private void updateBounds(){
+        mStart = 0;
+        T item = getFirst();
+        if(item != null){
+            mStart = item.getOffset();
+        }
+        mEnd = mStart;
+        item = getLast();
+        if(item != null){
+            mEnd = item.getOffset();
+        }
     }
 }

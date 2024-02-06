@@ -19,10 +19,11 @@ import com.reandroid.arsc.item.IntegerReference;
 import com.reandroid.dex.base.DexPositionAlign;
 import com.reandroid.dex.base.IntegerPair;
 import com.reandroid.dex.base.PositionAlignedItem;
-import com.reandroid.dex.item.DataSectionEntry;
+import com.reandroid.dex.data.DataItem;
+import com.reandroid.dex.pool.DataSectionPool;
 
 
-public class DataSection<T extends DataSectionEntry> extends Section<T> {
+public class DataSection<T extends DataItem> extends Section<T> {
 
     public DataSection(IntegerPair countAndOffset, SectionType<T> sectionType) {
         super(sectionType, new DataSectionArray<>(countAndOffset, sectionType.getCreator()));
@@ -32,19 +33,30 @@ public class DataSection<T extends DataSectionEntry> extends Section<T> {
     }
 
     @Override
-    public T get(int offset){
+    void clearUnused() {
+    }
+    @Override
+    public T getSectionItem(int offset){
         return getItemArray().getAt(offset);
     }
     @Override
-    public T[] get(int[] offsets){
+    public T[] getSectionItems(int[] offsets){
         return getItemArray().getAt(offsets);
     }
     public T createItem() {
         int position = estimateLastOffset();
         T item = getItemArray().createNext();
         item.setPosition(position);
-        getItemArray().registerOffset(item);
         return item;
+    }
+
+    @Override
+    public DataSectionPool<T> getPool() {
+        return (DataSectionPool<T>) super.getPool();
+    }
+    @Override
+    DataSectionPool<T> createPool(){
+        return new DataSectionPool<>(this);
     }
     @Override
     public DataSectionArray<T> getItemArray() {
@@ -81,6 +93,11 @@ public class DataSection<T extends DataSectionEntry> extends Section<T> {
         if(section != null){
             offset += section.getOffset();
         }
+        if(offset == 0){
+            // Seems like new/empty DexLayout, set non zero value to avoid invalid offset,
+            // anyways it will correct itself on refresh.
+            offset = 1;
+        }
         getOffsetReference().set(offset);
         return offset;
     }
@@ -101,7 +118,11 @@ public class DataSection<T extends DataSectionEntry> extends Section<T> {
 
     private void updateItemOffsets(int position){
         DataSectionArray<T> array = getItemArray();
-        position = array.updateItemOffsets(position);
+        position = array.updatePositionedItemOffsets(position);
         updateNextSection(position);
+    }
+    @Override
+    int getDiffCount(Section<T> section){
+        return getCount();
     }
 }

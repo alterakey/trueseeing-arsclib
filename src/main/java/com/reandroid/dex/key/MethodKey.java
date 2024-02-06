@@ -16,79 +16,199 @@
 package com.reandroid.dex.key;
 
 import com.reandroid.dex.common.DexUtils;
-import com.reandroid.dex.index.MethodId;
+import com.reandroid.dex.id.MethodId;
+import com.reandroid.dex.smali.SmaliParseException;
+import com.reandroid.dex.smali.SmaliReader;
+import com.reandroid.dex.smali.SmaliWriter;
 import com.reandroid.utils.CompareUtil;
 import com.reandroid.utils.StringsUtil;
+import com.reandroid.utils.collection.ArrayIterator;
+import com.reandroid.utils.collection.CombiningIterator;
+import com.reandroid.utils.collection.ComputeIterator;
+import com.reandroid.utils.collection.SingleIterator;
 
-import java.util.Objects;
+import java.io.IOException;
+import java.util.Iterator;
 
 public class MethodKey implements Key{
 
-    private final String defining;
+    private final String declaring;
     private final String name;
     private final String[] parameters;
     private final String returnType;
 
-    public MethodKey(String defining, String name, String[] parameters, String returnType){
-        this.defining = defining;
+    private int mParamsHash;
+
+    public MethodKey(String declaring, String name, String[] parameters, String returnType){
+        this.declaring = declaring;
         this.name = name;
         this.parameters = parameters;
         this.returnType = returnType;
     }
+    public MethodKey(TypeKey typeKey, String name, String[] parameters, String returnType){
+        this(typeKey.getTypeName(), name, parameters, returnType);
+    }
+    public MethodKey(TypeKey typeKey, String name, String[] parameters, TypeKey returnType){
+        this(typeKey.getTypeName(), name, parameters, returnType.getTypeName());
+    }
 
-    public TypeKey getDefiningKey() {
-        return new TypeKey(getDefining());
+    public int getRegister(int index) {
+        return getProtoKey().getRegister(index);
+    }
+    public MethodKey changeDeclaring(TypeKey typeKey){
+        return changeDeclaring(typeKey.getTypeName());
+    }
+    public MethodKey changeDeclaring(String declaring){
+        if(declaring.equals(getDeclaringName())){
+            return this;
+        }
+        return new MethodKey(declaring, getName(), getParameterNames(), getReturnTypeName());
+    }
+    public MethodKey changeName(String name){
+        if(name.equals(getName())){
+            return this;
+        }
+        return new MethodKey(getDeclaringName(), name, getParameterNames(), getReturnTypeName());
+    }
+    public MethodKey changeParameters(String[] parameters){
+        if(parameters == getParameterNames()){
+            return this;
+        }
+        return new MethodKey(getDeclaringName(), getName(), parameters, getReturnTypeName());
+    }
+    public MethodKey changeReturnType(TypeKey typeKey){
+        return changeReturnType(typeKey.getTypeName());
+    }
+    public MethodKey changeReturnType(String type){
+        if(type.equals(getReturnTypeName())){
+            return this;
+        }
+        return new MethodKey(getDeclaringName(), getName(), getParameterNames(), type);
+    }
+    public MethodKey removeParameter(int index){
+        ProtoKey protoKey = getProtoKey();
+        protoKey = protoKey.removeParameter(index);
+        return new MethodKey(getDeclaringName(), getName(), protoKey.getParameterNames(), getReturnTypeName());
+    }
+    @Override
+    public TypeKey getDeclaring() {
+        return new TypeKey(getDeclaringName());
     }
     public StringKey getNameKey() {
         return new StringKey(getName());
     }
     public ProtoKey getProtoKey() {
-        return new ProtoKey(getParameters(), getReturnType());
+        return new ProtoKey(getParameterNames(), getReturnTypeName());
     }
-    public TypeKey getReturnTypeKey() {
-        return new TypeKey(getReturnType());
-    }
-
-    public MethodKeyLocal getLocal(){
-        return new MethodKeyLocal(getName(), getParameters(), getReturnType());
+    public TypeKey getReturnType() {
+        return new TypeKey(getReturnTypeName());
     }
 
-    public String getDefining() {
-        return defining;
+    public String getDeclaringName() {
+        return declaring;
     }
     public String getName() {
         return name;
     }
-    public String[] getParameters() {
+    public String[] getParameterNames() {
         return parameters;
     }
-    public String getReturnType() {
+
+    public Iterator<TypeKey> getParameters(){
+        return ComputeIterator.of(ArrayIterator.of(getParameterNames()), TypeKey::create);
+    }
+    public int getParametersCount() {
+        String[] parameters = getParameterNames();
+        if(parameters != null){
+            return parameters.length;
+        }
+        return 0;
+    }
+    public String getParameter(int i){
+        return getParameterNames()[i];
+    }
+    public TypeKey getParameterType(int i){
+        return TypeKey.create(getParameter(i));
+    }
+    public String getReturnTypeName() {
         return returnType;
+    }
+    public int getParameterRegistersCount(){
+        return getProtoKey().getParameterRegistersCount();
+    }
+    @Override
+    public Iterator<Key> mentionedKeys() {
+        return CombiningIterator.singleTwo(
+                MethodKey.this,
+                CombiningIterator.singleOne(getDeclaring(), SingleIterator.of(getNameKey())),
+                getProtoKey().mentionedKeys());
+    }
+    @Override
+    public Key replaceKey(Key search, Key replace) {
+        MethodKey result = this;
+        if(search.equals(result)){
+            return replace;
+        }
+        if(search.equals(result.getDeclaring())){
+            result = result.changeDeclaring((TypeKey) replace);
+        }
+        if(search.equals(result.getReturnType())){
+            result = result.changeReturnType((TypeKey) replace);
+        }
+        String[] parameters = this.getParameterNames();
+        if(parameters != null && search instanceof TypeKey){
+            TypeKey searchType = (TypeKey) search;
+            String replaceType = ((TypeKey) replace).getTypeName();
+            int length = parameters.length;
+            for(int i = 0; i < length; i++){
+                if(searchType.equals(new TypeKey(parameters[i]))){
+                    parameters[i] = replaceType;
+                }
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void append(SmaliWriter writer) throws IOException {
+        getDeclaring().append(writer);
+        writer.append("->");
+        writer.append(getName());
+        getProtoKey().append(writer);
     }
 
     @Override
     public int compareTo(Object obj) {
+        return compareTo(obj, true);
+    }
+    public int compareTo(Object obj, boolean checkDefining) {
         if(obj == null){
             return -1;
         }
         MethodKey key = (MethodKey) obj;
-        int i = CompareUtil.compare(getDefining(), key.getDefining());
-        if(i != 0) {
-            return i;
+        int i;
+        if(checkDefining){
+            i = CompareUtil.compare(getDeclaringName(), key.getDeclaringName());
+            if(i != 0) {
+                return i;
+            }
         }
         i = CompareUtil.compare(getName(), key.getName());
         if(i != 0) {
             return i;
         }
-        i = CompareUtil.compare(getParameters(), key.getParameters());
+        i = CompareUtil.compare(getParameterNames(), key.getParameterNames());
         if(i != 0) {
             return i;
         }
-        return CompareUtil.compare(getReturnType(), key.getReturnType());
+        return CompareUtil.compare(getReturnTypeName(), key.getReturnTypeName());
     }
 
     @Override
     public boolean equals(Object obj) {
+        return equals(obj, true, true);
+    }
+    public boolean equals(Object obj, boolean checkDefining, boolean checkType) {
         if (this == obj) {
             return true;
         }
@@ -96,50 +216,76 @@ public class MethodKey implements Key{
             return false;
         }
         MethodKey methodKey = (MethodKey) obj;
-        return Objects.equals(getDefining(), methodKey.getDefining()) &&
-                Objects.equals(getName(), methodKey.getName()) &&
-                CompareUtil.compare(getParameters(), methodKey.getParameters()) == 0 &&
-        Objects.equals(getName(), methodKey.getName());
+        if(getNameParamsHashCode() != methodKey.getNameParamsHashCode()){
+            return false;
+        }
+        if(!KeyUtil.matches(getName(), methodKey.getName())){
+            return false;
+        }
+        int i = CompareUtil.compare(getParameterNames(), methodKey.getParameterNames());
+        if(i != 0) {
+            return false;
+        }
+        if(checkDefining){
+            if(!KeyUtil.matches(getDeclaringName(), methodKey.getDeclaringName())){
+                return false;
+            }
+        }
+        if(checkType){
+            return KeyUtil.matches(getReturnTypeName(), methodKey.getReturnTypeName());
+        }
+        return true;
     }
+
 
     @Override
     public int hashCode() {
         int hash = 1;
-        String defining = getDefining();
+        String defining = getDeclaringName();
         if(defining != null){
             hash += defining.hashCode();
         }
-        hash = hash * 31 + getName().hashCode();
-        String[] parameters = getParameters();
+        hash = hash * 31 + getNameParamsHashCode();
+        String returnType = getReturnTypeName();
+        hash = hash * 31;
+        if(returnType != null){
+            hash = hash + returnType.hashCode();
+        }
+        return hash;
+    }
+    private int getNameParamsHashCode() {
+        int hash = mParamsHash;
+        if(hash != 0){
+            return hash;
+        }
+        hash = 31 + getName().hashCode();
+        String[] parameters = getParameterNames();
         if(parameters != null){
             for(String param : parameters){
                 hash = hash * 31 + param.hashCode();
             }
         }
-        String returnType = getReturnType();
-        if (returnType != null){
-            hash = hash * 31 + returnType.hashCode();
-        }
+        mParamsHash = hash;
         return hash;
     }
     @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
-        String defining = getDefining();
+        String defining = getDeclaringName();
         if(defining != null){
             builder.append(defining);
             builder.append("->");
         }
         builder.append(getName());
         builder.append('(');
-        String[] parameters = getParameters();
+        String[] parameters = getParameterNames();
         if(parameters != null){
             for (String parameter : parameters) {
                 builder.append(parameter);
             }
         }
         builder.append(')');
-        String type = getReturnType();
+        String type = getReturnTypeName();
         if(type != null){
             builder.append(type);
         }
@@ -180,7 +326,7 @@ public class MethodKey implements Key{
     }
 
     public static MethodKey create(MethodId methodId){
-        String defining = methodId.getClassName();
+        TypeKey defining = methodId.getDefining();
         if(defining == null){
             return null;
         }
@@ -188,6 +334,55 @@ public class MethodKey implements Key{
         if(name == null){
             return null;
         }
-        return new MethodKey(defining, name, methodId.getParameterNames(), methodId.getReturnType());
+        return new MethodKey(defining, name, methodId.getParameterNames(), methodId.getReturnTypeName());
     }
+
+    public static MethodKey read(SmaliReader reader) throws IOException {
+        TypeKey declaring = TypeKey.read(reader);
+        reader.skipWhitespacesOrComment();
+        SmaliParseException.expect(reader, '-');
+        SmaliParseException.expect(reader, '>');
+        reader.skipWhitespacesOrComment();
+        String name = reader.readEscapedString('(');
+        ProtoKey protoKey = ProtoKey.read(reader);
+        return new MethodKey(
+                declaring.getTypeName(),
+                name,
+                protoKey.getParameterNames(),
+                protoKey.getReturnTypeName());
+    }
+
+    public static final MethodKey STATIC_CONSTRUCTOR = new MethodKey(
+            TypeKey.OBJECT.getTypeName(),
+            "<clinit>",
+            null,
+            TypeKey.TYPE_V.getTypeName());
+
+    public static final MethodKey EQUALS = new MethodKey(
+            TypeKey.OBJECT.getTypeName(),
+            "equals",
+            new String[]{TypeKey.OBJECT.getTypeName()},
+            TypeKey.TYPE_Z.getTypeName());
+
+    public static final MethodKey HASHCODE = new MethodKey(
+            TypeKey.OBJECT.getTypeName(),
+            "hashCode",
+            null,
+            TypeKey.TYPE_I.getTypeName());
+
+    public static final MethodKey TO_STRING = new MethodKey(
+            TypeKey.OBJECT.getTypeName(),
+            "toString",
+            null,
+            TypeKey.STRING.getTypeName());
+    public static final MethodKey CONSTRUCTOR = new MethodKey(
+            TypeKey.OBJECT.getTypeName(),
+            "<init>",
+            null,
+            TypeKey.TYPE_V.getTypeName());
+    public static final MethodKey CONSTRUCTOR_STATIC = new MethodKey(
+            TypeKey.OBJECT.getTypeName(),
+            "<clinit>",
+            null,
+            TypeKey.TYPE_V.getTypeName());
 }

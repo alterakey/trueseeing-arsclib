@@ -15,6 +15,8 @@
  */
 package com.reandroid.dex.value;
 
+import com.reandroid.dex.smali.model.SmaliValue;
+import com.reandroid.dex.smali.model.SmaliValueByte;
 import com.reandroid.utils.HexUtil;
 
 public class ByteValue extends PrimitiveValue {
@@ -35,6 +37,12 @@ public class ByteValue extends PrimitiveValue {
     }
     @Override
     public String getHex() {
-        return HexUtil.toHex(getNumberValue(), 1) + "B";
+        return HexUtil.toHex(getNumberValue(), 1) + "t";
+    }
+
+    @Override
+    public void fromSmali(SmaliValue smaliValue) {
+        SmaliValueByte smaliValueByte = (SmaliValueByte) smaliValue;
+        set(smaliValueByte.getValue());
     }
 }

@@ -15,28 +15,27 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.index.FieldId;
+import com.reandroid.dex.id.FieldId;
+import com.reandroid.dex.key.FieldKey;
 import com.reandroid.dex.sections.SectionType;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
 
 import java.io.IOException;
 
 public class EnumValue extends SectionIdValue<FieldId> {
+
     public EnumValue(){
         super(SectionType.FIELD_ID, DexValueType.ENUM);
     }
 
     @Override
+    public FieldKey getKey() {
+        return (FieldKey) super.getKey();
+    }
+
+    @Override
     public DexValueType<?> getValueType() {
         return DexValueType.ENUM;
-    }
-    @Override
-    public String getTypeName(){
-        FieldId fieldId = get();
-        if(fieldId == null){
-            return toString();
-        }
-        return fieldId.getFieldType().getName();
     }
     @Override
     public void append(SmaliWriter writer) throws IOException {

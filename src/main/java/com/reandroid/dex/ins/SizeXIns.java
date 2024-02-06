@@ -17,30 +17,45 @@ package com.reandroid.dex.ins;
 
 import com.reandroid.arsc.io.BlockReader;
 import com.reandroid.arsc.item.ByteArray;
-import com.reandroid.dex.index.IdSectionEntry;
-import com.reandroid.dex.item.InstructionList;
+import com.reandroid.dex.common.Register;
+import com.reandroid.dex.common.RegistersTable;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.data.InstructionList;
 import com.reandroid.dex.key.Key;
-import com.reandroid.dex.sections.Section;
+import com.reandroid.dex.reference.InsIdSectionReference;
 import com.reandroid.dex.sections.SectionType;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliInstruction;
 import com.reandroid.utils.HexUtil;
+import com.reandroid.utils.collection.SingleIterator;
 
 import java.io.IOException;
+import java.util.Iterator;
+import java.util.Objects;
 
 public class SizeXIns extends Ins {
 
     private final ByteArray valueBytes;
-    private IdSectionEntry mSectionItem;
+    private final InsIdSectionReference sectionReference;
 
     public SizeXIns(Opcode<?> opcode) {
         super(opcode);
         this.valueBytes = new ByteArray();
+
         addChild(0, valueBytes);
         valueBytes.setSize(opcode.size());
         valueBytes.putShort(0, opcode.getValue());
+
+        InsIdSectionReference sectionReference;
+        if(opcode.getSectionType() != null){
+            sectionReference = new InsIdSectionReference(this);
+        }else {
+            sectionReference = null;
+        }
+        this.sectionReference = sectionReference;
     }
 
-    public SectionType<? extends IdSectionEntry> getSectionType(){
+    public SectionType<? extends IdItem> getSectionType(){
         return getOpcode().getSectionType();
     }
 
@@ -117,57 +132,64 @@ public class SizeXIns extends Ins {
         cacheSectionItem();
     }
     void cacheSectionItem(){
-        SectionType<? extends IdSectionEntry> sectionType = getSectionType();
-        if(sectionType == null){
-            return;
-        }
-        int data = getData();
-        this.mSectionItem = get(sectionType, data);
-        if(this.mSectionItem != null){
-            this.mSectionItem.addUsageType(IdSectionEntry.USAGE_INSTRUCTION);
+        InsIdSectionReference sectionReference = this.sectionReference;
+        if(sectionReference != null){
+            sectionReference.pullItem();
         }
     }
-    public IdSectionEntry getSectionItem() {
-        return mSectionItem;
+    public IdItem getSectionId() {
+        InsIdSectionReference sectionReference = this.sectionReference;
+        if(sectionReference != null){
+            return sectionReference.getItem();
+        }
+        return null;
     }
-
-    public void setSectionItem(Key key){
-        Section<? extends IdSectionEntry> section = getSection(getSectionType());
-        IdSectionEntry item = section.getOrCreate(key);
-        setSectionItem(item);
+    public void setSectionId(IdItem item){
+        sectionReference.setItem(item);
     }
-    public void setSectionItem(IdSectionEntry item){
-        this.mSectionItem = item;
-        setData(item.getIndex());
+    public Key getSectionIdKey() {
+        IdItem entry = getSectionId();
+        if(entry != null){
+            return entry.getKey();
+        }
+        return null;
     }
-    public void setSectionIndex(int index){
-        setData(index);
-        cacheSectionItem();
+    public void setSectionIdKey(Key key){
+        sectionReference.setItem(key);
     }
 
     public int getData(){
         return getShortUnsigned(2);
     }
+    public int getSignedData(){
+        return getData();
+    }
     public void setData(int data){
         setShort(2, data);
+    }
+    @Override
+    public int getOutSize(){
+        if(getOpcode().hasOutRegisters()){
+            return ((RegistersSet) this).getRegistersCount();
+        }
+        return 0;
     }
 
     @Override
     protected void onRefreshed() {
         super.onRefreshed();
-        updateSectionItem();
-    }
-    void updateSectionItem(){
-        IdSectionEntry itemId = this.mSectionItem;
-        if(itemId != null){
-            setData(itemId.getIndex());
-            itemId.addUsageType(IdSectionEntry.USAGE_INSTRUCTION);
+        InsIdSectionReference sectionItem = this.sectionReference;
+        if(sectionItem != null){
+            sectionItem.refresh();
         }
     }
 
     public RegistersIterator getRegistersIterator() {
         if(this instanceof RegistersSet){
-            return new RegistersIterator(getRegistersTable(), (RegistersSet) this);
+            RegistersTable table = getRegistersTable();
+            if(table != null){
+                return new RegistersIterator(table, (RegistersSet) this);
+            }
         }
         return null;
     }
@@ -203,12 +225,152 @@ public class SizeXIns extends Ins {
     }
     void appendCodeData(SmaliWriter writer) throws IOException {
         writer.append(", ");
-        int data = getData();
-        IdSectionEntry sectionItem = getSectionItem();
+        IdItem sectionItem = getSectionId();
         if(sectionItem != null){
             sectionItem.append(writer);
         }else {
-            writer.append(HexUtil.toHex(data, 1));
+            appendHexData(writer);
         }
+    }
+    void appendHexData(SmaliWriter writer) throws IOException {
+        writer.appendHex(getSignedData());
+    }
+
+    @Override
+    public void replaceKeys(Key search, Key replace){
+        Key key = getSectionIdKey();
+        if(key == null){
+            return;
+        }
+        Key key2 = key.replaceKey(search, replace);
+        if(key != key2){
+            setSectionIdKey(key2);
+        }
+    }
+    @Override
+    public Iterator<IdItem> usedIds(){
+        return SingleIterator.of(getSectionId());
+    }
+    public void merge(Ins ins){
+        SizeXIns coming = (SizeXIns) ins;
+        SectionType<? extends IdItem> sectionType = coming.getSectionType();
+        if(sectionType == null){
+            this.valueBytes.set(coming.valueBytes.getBytes().clone());
+            return;
+        }
+        setSectionIdKey(coming.getSectionIdKey());
+        this.sectionReference.validate();
+        RegistersSet comingSet = (RegistersSet) coming;
+        RegistersSet set = (RegistersSet) this;
+        int count = comingSet.getRegistersCount();
+        set.setRegistersCount(count);
+        for(int i = 0; i < count; i++){
+            set.setRegister(i, comingSet.getRegister(i));
+        }
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        SizeXIns sizeXIns = (SizeXIns) obj;
+        if(getIndex() != sizeXIns.getIndex()){
+            return false;
+        }
+        if(getOpcode() != sizeXIns.getOpcode()){
+            return false;
+        }
+        if(this instanceof RegistersSet){
+            if(!areEqual((RegistersSet) this, (RegistersSet) sizeXIns)){
+                return false;
+            }
+        }
+        if(getSectionType() != null){
+            return Objects.equals(getSectionIdKey(), sizeXIns.getSectionIdKey());
+        }else {
+            return getData() == sizeXIns.getData();
+        }
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 1;
+        hash = hash + getIndex();
+        hash = hash * 31 + getOpcode().getValue();
+        if(this instanceof RegistersSet){
+            RegistersSet set = (RegistersSet) this;
+            int count = set.getRegistersCount();
+            hash = hash * 31 + count;
+            for(int i = 0; i < count; i++){
+                hash = hash * 31 + set.getRegister(i);
+            }
+        }
+        hash = hash * 31;
+        Key key = getSectionIdKey();
+        if(key != null){
+            hash = hash + key.hashCode();
+        }else {
+            hash = hash + getData();
+        }
+        return hash;
+    }
+
+    @Override
+    public void fromSmali(SmaliInstruction smaliInstruction) throws IOException {
+        fromSmaliRegisters(smaliInstruction);
+        fromSmaliKey(smaliInstruction);
+        fromSmaliData(smaliInstruction);
+    }
+    private void fromSmaliRegisters(SmaliInstruction smaliInstruction){
+        if(!(this instanceof RegistersSet)){
+            return;
+        }
+        int count = smaliInstruction.getRegistersCount();
+        RegistersSet registersSet = (RegistersSet) this;
+        registersSet.setRegistersCount(count);
+        for(int i = 0; i < count; i++){
+            Register register = smaliInstruction.getRegister(i);
+            registersSet.setRegister(i, register.getValue());
+        }
+    }
+    private void fromSmaliKey(SmaliInstruction smaliInstruction){
+        if(getSectionType() == null){
+            return;
+        }
+        setSectionIdKey(smaliInstruction.getKey());
+    }
+    private void fromSmaliData(SmaliInstruction smaliInstruction) throws IOException {
+        Number data = smaliInstruction.getData();
+        if(data == null){
+            return;
+        }
+        if(data instanceof Long){
+            setLong((Long) data);
+        }else {
+            setData(data.intValue());
+        }
+    }
+
+    private static boolean areEqual(RegistersSet set1, RegistersSet set2){
+        if(set1 == set2){
+            return true;
+        }
+        if(set1 == null){
+            return false;
+        }
+        int count = set1.getRegistersCount();
+        if(count != set2.getRegistersCount()){
+            return false;
+        }
+        for(int i = 0; i < count; i++){
+            if(set1.getRegister(i) != set2.getRegister(i)){
+                return false;
+            }
+        }
+        return true;
     }
 }

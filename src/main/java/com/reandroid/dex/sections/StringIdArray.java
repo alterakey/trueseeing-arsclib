@@ -16,9 +16,10 @@
 package com.reandroid.dex.sections;
 
 import com.reandroid.arsc.base.Creator;
+import com.reandroid.dex.base.BlockListArray;
 import com.reandroid.dex.base.IntegerPair;
-import com.reandroid.dex.index.StringId;
-import com.reandroid.dex.item.StringData;
+import com.reandroid.dex.id.StringId;
+import com.reandroid.dex.data.StringData;
 
 public class StringIdArray extends IdSectionArray<StringId> {
 
@@ -27,11 +28,10 @@ public class StringIdArray extends IdSectionArray<StringId> {
     }
 
     public void link(StringDataArray dataArray){
-        StringId[] childes = getChildes();
-        int length = childes.length;
+        int length = size();
         for(int i = 0; i < length; i++){
-            StringId stringId = childes[i];
-            StringData stringData = dataArray.getAt(stringId.get());
+            StringId stringId = get(i);
+            StringData stringData = dataArray.getAt(stringId.get(), stringId.getIndex());
             stringId.linkStringData(stringData);
         }
     }

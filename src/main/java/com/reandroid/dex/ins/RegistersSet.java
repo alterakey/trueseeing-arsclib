@@ -16,6 +16,8 @@
 package com.reandroid.dex.ins;
 
 
+import com.reandroid.dex.common.RegisterFormat;
+
 public interface RegistersSet {
     int getRegistersCount();
     void setRegistersCount(int count);
@@ -27,4 +29,13 @@ public interface RegistersSet {
         return false;
     }
     int getRegistersLimit();
+    default int getRegister() {
+        return getRegister(0);
+    }
+    default void setRegister(int register){
+        setRegister(0, register);
+    }
+    default RegisterFormat getRegisterFormat(){
+        return null;
+    }
 }

@@ -16,39 +16,74 @@
 package com.reandroid.dex.ins;
 
 import com.reandroid.dex.base.Ule128Item;
-import com.reandroid.dex.index.TypeId;
-import com.reandroid.dex.item.DexContainerItem;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.id.TypeId;
+import com.reandroid.dex.data.FixedDexContainerWithTool;
+import com.reandroid.dex.data.InstructionList;
+import com.reandroid.dex.smali.SmaliDirective;
+import com.reandroid.dex.smali.SmaliRegion;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliCodeExceptionHandler;
 import com.reandroid.utils.HexUtil;
 import com.reandroid.utils.collection.ArrayIterator;
+import com.reandroid.utils.collection.EmptyIterator;
 
 import java.io.IOException;
 import java.util.Iterator;
 
-public abstract class ExceptionHandler extends DexContainerItem
-        implements Iterable<Label>, LabelsSet {
+public abstract class ExceptionHandler extends FixedDexContainerWithTool
+        implements SmaliRegion, Iterable<Label>, LabelsSet {
 
     private final Ule128Item catchAddress;
-    private final Label handlerLabel;
-    private final Label startLabel;
 
-    public ExceptionHandler(int childesCount) {
-        super(childesCount + 1);
-        this.catchAddress = new Ule128Item();
-        addChild(childesCount, catchAddress);
-        this.handlerLabel = new HandlerLabel(this);
+    private final ExceptionLabel startLabel;
+    private final ExceptionLabel endLabel;
+    private final ExceptionLabel handlerLabel;
+    private final ExceptionLabel catchLabel;
+
+    private Label[] mLabels;
+
+
+    private ExceptionHandler(int childesCount, Ule128Item catchAddress, int index) {
+        super(childesCount);
+        this.catchAddress = catchAddress;
+        if(catchAddress != null){
+            addChild(index, catchAddress);
+        }
+
         this.startLabel = new TryStartLabel(this);
+        this.endLabel = new TryEndLabel(this);
+        this.handlerLabel = new HandlerLabel(this);
+        this.catchLabel = new CatchLabel(this);
+
+        this.mLabels = new Label[]{this.startLabel, this.endLabel, this.handlerLabel, this.catchLabel};
+    }
+    ExceptionHandler(int childesCount) {
+        this(childesCount + 1, new Ule128Item(), childesCount);
     }
 
     ExceptionHandler() {
-        super(0);
-        this.catchAddress = null;
-        this.handlerLabel = new HandlerLabel(this);
-        this.startLabel = new TryStartLabel(this);
+        this(0, null, 0);
+    }
+
+
+    public Iterator<Ins> getTryInstructions(){
+        InstructionList instructionList = getInstructionList();
+        if(instructionList == null){
+            return EmptyIterator.of();
+        }
+        return instructionList.iteratorByAddress(
+                getStartLabel().getTargetAddress(), getCodeUnit());
+    }
+    private InstructionList getInstructionList(){
+        TryItem tryItem = getTryItem();
+        if(tryItem != null){
+            return tryItem.getInstructionList();
+        }
+        return null;
     }
 
     abstract TypeId getTypeId();
-    abstract String getOpcodeName();
+    public abstract SmaliDirective getSmaliDirective();
     Ule128Item getCatchAddressUle128(){
         return catchAddress;
     }
@@ -59,12 +94,19 @@ public abstract class ExceptionHandler extends DexContainerItem
     }
     @Override
     public Iterator<Label> iterator(){
-        return ArrayIterator.of(new Label[]{
-                getStartLabel(),
-                getEndLabel(),
-                getHandlerLabel(),
-                getCatchLabel()
-        });
+        return ArrayIterator.of(mLabels);
+    }
+    public ExceptionLabel getHandlerLabel(){
+        return handlerLabel;
+    }
+    public ExceptionLabel getStartLabel(){
+        return startLabel;
+    }
+    public ExceptionLabel getEndLabel(){
+        return endLabel;
+    }
+    public ExceptionLabel getCatchLabel(){
+        return catchLabel;
     }
 
     public int getCatchAddress(){
@@ -79,18 +121,7 @@ public abstract class ExceptionHandler extends DexContainerItem
     public void setAddress(int address){
         setCodeUnit(address - getStartAddress());
     }
-    public Label getHandlerLabel(){
-        return handlerLabel;
-    }
-    public Label getStartLabel(){
-        return startLabel;
-    }
-    public Label getEndLabel(){
-        return new TryEndLabel(this);
-    }
-    public Label getCatchLabel(){
-        return new CatchLabel(this);
-    }
+
     public int getStartAddress(){
         TryItem tryItem = getTryItem();
         if(tryItem != null){
@@ -121,12 +152,62 @@ public abstract class ExceptionHandler extends DexContainerItem
         return getParentInstance(TryItem.class);
     }
 
+    public void onRemove(){
+        mLabels = null;
+        setParent(null);
+    }
+    public void merge(ExceptionHandler handler){
+        catchAddress.set(handler.catchAddress.get());
+    }
+    @Override
+    public void append(SmaliWriter writer) throws IOException {
+
+    }
+    public void fromSmali(SmaliCodeExceptionHandler smaliCodeExceptionHandler){
+        getHandlerLabel().setTargetAddress(smaliCodeExceptionHandler.getAddress());
+        getStartLabel().setTargetAddress(smaliCodeExceptionHandler.getStart().getAddress());
+        getEndLabel().setTargetAddress(smaliCodeExceptionHandler.getEnd().getAddress());
+        getCatchLabel().setTargetAddress(smaliCodeExceptionHandler.getCatchLabel().getAddress());
+    }
+
+    boolean isTypeEqual(ExceptionHandler handler){
+        return true;
+    }
+    int getTypeHashCode(){
+        return 0;
+    }
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        ExceptionHandler handler = (ExceptionHandler) obj;
+        return getStartAddress() == handler.getStartAddress() &&
+                getAddress() == handler.getAddress() &&
+                getCatchAddress() == handler.getCatchAddress() &&
+                isTypeEqual(handler);
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 1;
+        hash = hash * 31 + getStartAddress();
+        hash = hash * 31 + getAddress();
+        hash = hash * 31 + getCatchAddress();
+        hash = hash * 31 + getTypeHashCode();
+        return hash;
+    }
+
     @Override
     public String toString() {
         return getHandlerLabel().toString();
     }
 
-    static class HandlerLabel implements Label{
+    public static class HandlerLabel implements ExceptionLabel{
+
         private final ExceptionHandler handler;
 
         HandlerLabel(ExceptionHandler handler){
@@ -134,16 +215,21 @@ public abstract class ExceptionHandler extends DexContainerItem
         }
 
         @Override
+        public ExceptionHandler getHandler() {
+            return handler;
+        }
+
+        @Override
         public int getAddress(){
-            return handler.getAddress();
+            return getHandler().getAddress();
         }
         @Override
         public int getTargetAddress() {
-            return handler.getAddress();
+            return getHandler().getAddress();
         }
         @Override
         public void setTargetAddress(int targetAddress){
-            handler.setAddress(targetAddress);
+            getHandler().setAddress(targetAddress);
         }
 
         @Override
@@ -151,7 +237,7 @@ public abstract class ExceptionHandler extends DexContainerItem
             ExceptionHandler handler = this.handler;
             StringBuilder builder = new StringBuilder();
             builder.append('.');
-            builder.append(handler.getOpcodeName());
+            builder.append(handler.getSmaliDirective().getName());
             builder.append(' ');
             TypeId typeId = handler.getTypeId();
             if(typeId != null){
@@ -185,9 +271,7 @@ public abstract class ExceptionHandler extends DexContainerItem
         @Override
         public void appendExtra(SmaliWriter writer) throws IOException {
             ExceptionHandler handler = this.handler;
-            writer.append('.');
-            writer.append(handler.getOpcodeName());
-            writer.append(' ');
+            handler.getSmaliDirective().append(writer);
             TypeId typeId = handler.getTypeId();
             if(typeId != null){
                 typeId.append(writer);
@@ -206,22 +290,30 @@ public abstract class ExceptionHandler extends DexContainerItem
         }
     }
 
-    static class TryStartLabel implements Label{
+    public static class TryStartLabel implements ExceptionLabel{
+
         private final ExceptionHandler handler;
+
         TryStartLabel(ExceptionHandler handler){
             this.handler = handler;
         }
+
+        @Override
+        public ExceptionHandler getHandler() {
+            return handler;
+        }
+
         @Override
         public int getAddress(){
-            return handler.getAddress();
+            return getHandler().getAddress();
         }
         @Override
         public int getTargetAddress() {
-            return handler.getStartAddress();
+            return getHandler().getStartAddress();
         }
         @Override
         public void setTargetAddress(int targetAddress){
-            handler.setStartAddress(targetAddress);
+            getHandler().setStartAddress(targetAddress);
         }
         @Override
         public String getLabelName() {
@@ -253,26 +345,35 @@ public abstract class ExceptionHandler extends DexContainerItem
         }
     }
 
-    static class TryEndLabel implements Label{
+    public static class TryEndLabel implements ExceptionLabel{
+
         private final ExceptionHandler handler;
+
         TryEndLabel(ExceptionHandler handler){
             this.handler = handler;
         }
+
+        @Override
+        public ExceptionHandler getHandler() {
+            return handler;
+        }
+
         @Override
         public int getAddress() {
-            return handler.getAddress();
+            return getHandler().getAddress();
         }
         @Override
         public int getTargetAddress() {
-            return handler.getAddress();
+            return getHandler().getAddress();
         }
         @Override
         public void setTargetAddress(int targetAddress){
-            handler.setAddress(targetAddress);
+            getHandler().setAddress(targetAddress);
         }
         @Override
         public String getLabelName() {
-            return HexUtil.toHex(":try_end_", getTargetAddress(), 1);
+            int startAddress = handler.getStartLabel().getTargetAddress();
+            return HexUtil.toHex(":try_end_", startAddress, 1);
         }
 
         @Override
@@ -299,26 +400,34 @@ public abstract class ExceptionHandler extends DexContainerItem
         }
     }
 
-    static class CatchLabel implements Label{
+    public static class CatchLabel implements ExceptionLabel{
+
         private final ExceptionHandler handler;
+
         CatchLabel(ExceptionHandler handler){
             this.handler = handler;
         }
+
+        @Override
+        public ExceptionHandler getHandler() {
+            return handler;
+        }
+
         @Override
         public int getAddress() {
-            return handler.getStartLabel().getAddress();
+            return getHandler().getStartLabel().getAddress();
         }
         @Override
         public int getTargetAddress() {
-            return handler.getCatchAddress();
+            return getHandler().getCatchAddress();
         }
         @Override
         public void setTargetAddress(int targetAddress){
-            handler.setCatchAddress(targetAddress);
+            getHandler().setCatchAddress(targetAddress);
         }
         @Override
         public String getLabelName() {
-            return HexUtil.toHex(":" + handler.getOpcodeName() + "_", getTargetAddress(), 1);
+            return HexUtil.toHex(":" + getHandler().getSmaliDirective() + "_", getTargetAddress(), 1);
         }
         @Override
         public int getSortOrder() {
@@ -336,7 +445,8 @@ public abstract class ExceptionHandler extends DexContainerItem
             if(handler == label.handler){
                 return true;
             }
-            return getTargetAddress() == label.getTargetAddress();
+            return getTargetAddress() == label.getTargetAddress() &&
+                    getHandler().getSmaliDirective().equals(label.getHandler().getSmaliDirective());
         }
         @Override
         public String toString() {

@@ -15,7 +15,10 @@
  */
 package com.reandroid.dex.base;
 
-public class ParallelIntegerPair implements IntegerPair {
+import com.reandroid.arsc.base.BlockRefresh;
+import com.reandroid.arsc.item.IntegerReference;
+
+public class ParallelIntegerPair implements IntegerPair, BlockRefresh {
 
     private final ParallelReference first;
     private final ParallelReference second;
@@ -26,10 +29,17 @@ public class ParallelIntegerPair implements IntegerPair {
     }
 
     public void setReference2(IntegerPair integerPair){
-        if(integerPair != this){
-            getFirst().setReference2(integerPair.getFirst());
-            getSecond().setReference2(integerPair.getSecond());
+        IntegerReference first;
+        IntegerReference second;
+        if(integerPair == null){
+            first = null;
+            second = null;
+        }else {
+            first = integerPair.getFirst();
+            second = integerPair.getSecond();
         }
+        getFirst().setReference2(first);
+        getSecond().setReference2(second);
     }
     @Override
     public ParallelReference getFirst() {
@@ -38,5 +48,10 @@ public class ParallelIntegerPair implements IntegerPair {
     @Override
     public ParallelReference getSecond() {
         return second;
+    }
+    @Override
+    public void refresh(){
+        getFirst().refresh();
+        getSecond().refresh();
     }
 }

@@ -17,6 +17,7 @@ package com.reandroid.arsc.chunk.xml;
 
 import com.reandroid.arsc.chunk.PackageBlock;
 import com.reandroid.arsc.model.ResourceLibrary;
+import com.reandroid.xml.XMLUtil;
 import org.xmlpull.v1.XmlSerializer;
 
 import java.io.IOException;
@@ -91,7 +92,7 @@ public class ResXmlPullSerializer implements XmlSerializer {
         ResXmlElement element = mCurrentElement;
         if(element == null){
             ResXmlDocument document =  getCurrentDocument();
-            element = document.getResXmlElement();
+            element = document.getDocumentElement();
             if(element == null){
                 element = document.createRootElement(null);
             }
@@ -223,7 +224,7 @@ public class ResXmlPullSerializer implements XmlSerializer {
             element = element.createChildElement(name);
             mCurrentElement = element;
         }
-        element.setTagNamespace(namespace, prefix);
+        element.setNamespace(namespace, prefix);
         mCurrentElement = element;
         return this;
     }
@@ -252,7 +253,7 @@ public class ResXmlPullSerializer implements XmlSerializer {
     public ResXmlPullSerializer endTag(String namespace, String name) throws IOException, IllegalArgumentException, IllegalStateException {
         flushText();
         mCurrentElement.calculateAttributesOrder();
-        mCurrentElement = mCurrentElement.getParentResXmlElement();
+        mCurrentElement = mCurrentElement.getParentElement();
         return this;
     }
 
@@ -274,17 +275,7 @@ public class ResXmlPullSerializer implements XmlSerializer {
 
     @Override
     public void entityRef(String text) throws IOException, IllegalArgumentException, IllegalStateException {
-        String decoded;
-        if("lt".equals(text)){
-            decoded = "<";
-        }else if("gt".equals(text)){
-            decoded = ">";
-        }else if("amp".equals(text)){
-            decoded = "&";
-        }else {
-            decoded = text;
-        }
-        appendText(decoded);
+        appendText(XMLUtil.decodeEntityRef(text));
     }
 
     @Override

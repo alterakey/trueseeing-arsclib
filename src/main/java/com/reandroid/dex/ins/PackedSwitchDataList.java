@@ -18,11 +18,9 @@ package com.reandroid.dex.ins;
 import com.reandroid.arsc.item.IntegerReference;
 import com.reandroid.common.ArraySupplier;
 import com.reandroid.utils.collection.ArraySupplierIterator;
-import com.reandroid.arsc.item.IntegerVisitor;
-import com.reandroid.arsc.item.VisitableInteger;
-import com.reandroid.dex.item.IntegerList;
-import com.reandroid.dex.writer.SmaliFormat;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.data.IntegerList;
+import com.reandroid.dex.smali.SmaliFormat;
+import com.reandroid.dex.smali.SmaliWriter;
 import com.reandroid.utils.HexUtil;
 
 import java.io.IOException;
@@ -30,7 +28,7 @@ import java.util.Iterator;
 import java.util.Objects;
 
 public class PackedSwitchDataList extends IntegerList
-        implements SmaliFormat, LabelsSet, VisitableInteger {
+        implements SmaliFormat, LabelsSet {
 
     private final IntegerReference firstKey;
     private final InsPackedSwitchData switchData;
@@ -41,13 +39,6 @@ public class PackedSwitchDataList extends IntegerList
         this.switchData = switchData;
     }
 
-    @Override
-    public void visitIntegers(IntegerVisitor visitor) {
-        int size = size();
-        for(int i = 0; i < size; i++){
-            visitor.visit(this, getData(i));
-        }
-    }
     public int getFirstKey(){
         return firstKey.get();
     }
@@ -64,6 +55,16 @@ public class PackedSwitchDataList extends IntegerList
     public Data getData(int index){
         return new Data(this, index);
     }
+
+    public void merge(PackedSwitchDataList dataList){
+        firstKey.set(dataList.firstKey.get());
+        int size = dataList.size();
+        setSize(size);
+        for(int i = 0; i < size; i++){
+            put(i, dataList.get(i));
+        }
+    }
+
     @Override
     public void append(SmaliWriter writer) throws IOException {
         int size = size();

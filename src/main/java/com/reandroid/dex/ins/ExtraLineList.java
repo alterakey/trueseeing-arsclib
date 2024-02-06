@@ -1,10 +1,11 @@
 package com.reandroid.dex.ins;
 
 import com.reandroid.common.ArraySupplier;
+import com.reandroid.utils.collection.ArraySort;
 import com.reandroid.utils.collection.ArraySupplierIterator;
 import com.reandroid.utils.collection.EmptyIterator;
+import com.reandroid.utils.collection.InstanceIterator;
 
-import java.util.Arrays;
 import java.util.Iterator;
 
 public class ExtraLineList implements ArraySupplier<ExtraLine>, Iterable<ExtraLine> {
@@ -15,8 +16,27 @@ public class ExtraLineList implements ArraySupplier<ExtraLine>, Iterable<ExtraLi
     public ExtraLineList(){
     }
 
+    public boolean contains(Object obj) {
+        if(obj == null){
+            return false;
+        }
+        ExtraLine[] elements = this.elements;
+        if(elements == null){
+            return false;
+        }
+        for(ExtraLine line : elements){
+            if(obj.equals(line)){
+                return true;
+            }
+        }
+        return false;
+    }
     public boolean isEmpty(){
         return getCount() != 0;
+    }
+
+    public<T1> Iterator<T1> iterator(Class<T1> instance){
+        return InstanceIterator.of(iterator(), instance);
     }
     @Override
     public Iterator<ExtraLine> iterator() {
@@ -43,7 +63,7 @@ public class ExtraLineList implements ArraySupplier<ExtraLine>, Iterable<ExtraLi
             this.sorted = true;
             return;
         }
-        Arrays.sort(elements, 0, this.size, ExtraLine.COMPARATOR);
+        ArraySort.sort(elements, 0, this.size, ExtraLine.COMPARATOR);
         this.sorted = true;
     }
     public void add(Iterator<ExtraLine> iterator){
@@ -52,7 +72,7 @@ public class ExtraLineList implements ArraySupplier<ExtraLine>, Iterable<ExtraLi
         }
     }
     public void add(ExtraLine extraLine){
-        if (extraLine == null){
+        if (extraLine == null || contains(extraLine)){
             return;
         }
         ensureCapacity();
@@ -157,6 +177,11 @@ public class ExtraLineList implements ArraySupplier<ExtraLine>, Iterable<ExtraLi
         @Override
         public Iterator<ExtraLine> iterator() {
             return EmptyIterator.of();
+        }
+
+        @Override
+        public boolean contains(Object obj) {
+            return false;
         }
         @Override
         public boolean isEmpty() {

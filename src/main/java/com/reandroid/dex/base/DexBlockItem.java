@@ -15,69 +15,17 @@
  */
 package com.reandroid.dex.base;
 
-import com.reandroid.arsc.base.Block;
 import com.reandroid.arsc.item.BlockItem;
+import com.reandroid.dex.common.SectionTool;
 import com.reandroid.dex.io.ByteReader;
 import com.reandroid.dex.io.StreamUtil;
-import com.reandroid.dex.pool.DexIdPool;
-import com.reandroid.dex.sections.Section;
-import com.reandroid.dex.sections.SectionList;
-import com.reandroid.dex.sections.SectionType;
-
 import java.io.IOException;
 import java.io.InputStream;
 
-public abstract class DexBlockItem extends BlockItem {
+public abstract class DexBlockItem extends BlockItem implements SectionTool {
 
     public DexBlockItem(int bytesLength) {
         super(bytesLength);
-    }
-
-    public<T1 extends Block> T1 createItem(SectionType<T1> sectionType) {
-        Section<T1> section = getOrCreateSection(sectionType);
-        if(section != null){
-            return section.createItem();
-        }
-        return null;
-    }
-    public<T1 extends Block> T1[] get(SectionType<T1> sectionType, int[] indexes){
-        if(indexes == null || indexes.length == 0){
-            return null;
-        }
-        Section<T1> section = getSection(sectionType);
-        if(section == null){
-            return null;
-        }
-        return section.get(indexes);
-    }
-    public<T1 extends Block> T1 get(SectionType<T1> sectionType, int i){
-        Section<T1> section = getSection(sectionType);
-        if(section != null){
-            return section.get(i);
-        }
-        return null;
-    }
-    public<T1 extends Block> Section<T1> getSection(SectionType<T1> sectionType){
-        SectionList sectionList = getParent(SectionList.class);
-        if(sectionList != null){
-            return sectionList.get(sectionType);
-        }
-        return null;
-    }
-    public<T1 extends Block> Section<T1> getOrCreateSection(SectionType<T1> sectionType){
-        SectionList sectionList = getParent(SectionList.class);
-        if(sectionList != null){
-            return sectionList.getOrCreate(sectionType);
-        }
-        return null;
-    }
-
-    public<T1 extends Block> DexIdPool<T1> getPool(SectionType<T1> sectionType){
-        Section<T1> section = getSection(sectionType);
-        if(section != null){
-            return section.getPool();
-        }
-        return null;
     }
 
     public static int writeUleb128(byte[] bytes, int offset, int value) {

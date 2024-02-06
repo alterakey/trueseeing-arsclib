@@ -15,27 +15,25 @@
  */
 package com.reandroid.dex.refactor;
 
-import com.reandroid.arsc.base.Block;
-import com.reandroid.arsc.group.ItemGroup;
+import com.reandroid.dex.common.SectionItem;
+import com.reandroid.dex.id.StringId;
 import com.reandroid.dex.key.KeyItem;
-import com.reandroid.dex.item.StringData;
 import com.reandroid.dex.key.Key;
-import com.reandroid.dex.pool.DexIdPool;
+import com.reandroid.dex.model.DexDirectory;
+import com.reandroid.dex.pool.DexSectionPool;
 import com.reandroid.dex.sections.Section;
 import com.reandroid.dex.sections.SectionList;
 import com.reandroid.dex.sections.SectionType;
+import com.reandroid.utils.collection.ArrayCollection;
 import com.reandroid.utils.collection.CombiningIterator;
 import com.reandroid.utils.collection.ComputeIterator;
 import com.reandroid.utils.collection.SingleIterator;
 
 import java.io.IOException;
 import java.io.Writer;
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
-public abstract class RenameInfo<T extends Block> implements KeyItem {
+public abstract class RenameInfo<T extends SectionItem> implements KeyItem {
     private final String search;
     private final String replace;
     private List<RenameInfo<?>> childRenames;
@@ -46,8 +44,11 @@ public abstract class RenameInfo<T extends Block> implements KeyItem {
         this.replace = replace;
     }
 
+    public void apply(DexDirectory dexDirectory){
+
+    }
     public void apply(SectionList sectionList){
-        apply(sectionList.get(getSectionType()));
+        apply(sectionList.getSection(getSectionType()));
         Iterator<RenameInfo<?>> iterator = getChildRenames();
         while (iterator.hasNext()){
             RenameInfo<?> renameInfo = iterator.next();
@@ -58,14 +59,14 @@ public abstract class RenameInfo<T extends Block> implements KeyItem {
         if(section == null){
             return;
         }
-        DexIdPool<T> pool = section.getPool();
+        DexSectionPool<T> pool = section.getPool();
         Key key = getKey();
-        ItemGroup<T> group = pool.getGroup(getKey());
+        Iterable<T> group = pool.getGroup(key);
         if(group == null){
             return;
         }
         apply(group);
-        pool.keyChanged(key);
+        pool.update(key);
         addRenameCount();
     }
 
@@ -87,7 +88,7 @@ public abstract class RenameInfo<T extends Block> implements KeyItem {
         }
         return false;
     }
-    public boolean lookString(StringData stringData){
+    public boolean lookString(StringId stringData){
         return false;
     }
     public boolean looksStrings(){
@@ -113,7 +114,7 @@ public abstract class RenameInfo<T extends Block> implements KeyItem {
         }
         List<RenameInfo<?>> renameInfoList = listChildRenames();
         if(renameInfoList == null || renameInfoList.isEmpty()){
-            renameInfoList = new ArrayList<>();
+            renameInfoList = new ArrayCollection<>();
         }
         renameInfoList.add(renameInfo);
     }
@@ -130,7 +131,7 @@ public abstract class RenameInfo<T extends Block> implements KeyItem {
     }
 
     abstract SectionType<T> getSectionType();
-    abstract void apply(ItemGroup<T> group);
+    abstract void apply(Iterable<T> group);
     abstract List<RenameInfo<?>> createChildRenames();
     void addRenameCount(){
         renameCount ++;
@@ -191,6 +192,9 @@ public abstract class RenameInfo<T extends Block> implements KeyItem {
         for(int i = 0; i < depth; i++){
             writer.append(' ');
         }
+    }
+    private String getLogTag(){
+        return "[" + getClass().getSimpleName() + "] ";
     }
     @Override
     public String toString() {

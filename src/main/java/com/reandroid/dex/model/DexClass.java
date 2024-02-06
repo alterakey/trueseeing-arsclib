@@ -16,22 +16,27 @@
 package com.reandroid.dex.model;
 
 import com.reandroid.dex.common.AccessFlag;
-import com.reandroid.dex.index.ClassId;
-import com.reandroid.dex.index.ItemOffsetReference;
-import com.reandroid.dex.ins.Ins;
-import com.reandroid.dex.item.StringData;
-import com.reandroid.dex.item.*;
-import com.reandroid.dex.key.AnnotationKey;
-import com.reandroid.dex.key.FieldKey;
+import com.reandroid.dex.data.*;
+import com.reandroid.dex.id.ClassId;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.key.*;
+import com.reandroid.dex.reference.TypeListReference;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.value.DexValueBlock;
+import com.reandroid.dex.value.DexValueType;
+import com.reandroid.dex.value.NullValue;
 import com.reandroid.dex.value.StringValue;
-import com.reandroid.dex.writer.SmaliWriter;
 import com.reandroid.utils.collection.*;
+import com.reandroid.utils.io.FileUtil;
 
 import java.io.*;
-import java.util.*;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
 import java.util.function.Predicate;
 
-public class DexClass extends DexDef implements Comparable<DexClass> {
+public class DexClass extends DexDeclaration implements Comparable<DexClass> {
     private final DexFile dexFile;
     private final ClassId classId;
 
@@ -40,149 +45,97 @@ public class DexClass extends DexDef implements Comparable<DexClass> {
         this.classId = classId;
     }
 
-    public void logAnnotation(){
-        getClassData();
-        AnnotationSet annotationSet = getAnnotations();
-        if(annotationSet == null){
-            return;
-        }
-        AnnotationKey key = new AnnotationKey("Lkotlin/coroutines/jvm/internal/f;", "c");
-        AnnotationItem item = annotationSet.get(key);
-        if(item == null){
-            return;
-        }
-        AnnotationElement element = item.getElement("c");
-        String value = ((StringValue)element.getValue()).getString();
-        int i = value.lastIndexOf('.');
-        value = value.substring(0, i + 1);
-        value = value.replace('.', '/');
-        value = "L"+value;
-
-        String pkg = getPackageName();
-        if(pkg.equals(value)){
-            return;
-        }
-        String msg = pkg + "=" + value;
-        System.err.println(msg);
+    public void replaceKeys(Key search, Key replace){
+        getId().replaceKeys(search, replace);
     }
-    public void cleanKotlin(){
-        getClassData();
-        cleanKotlinAnnotation();
-        cleanKotlinIntrinsics();
+    public Set<DexClass> getRequired(){
+        Set<DexClass> results = new HashSet<>();
+        results.add(this);
+        searchRequired(results);
+        return results;
     }
-    private void cleanKotlinIntrinsics(){
-        ClassData classData = getClassData();
-        if(classData == null){
-            return;
-        }
-        MethodDefArray defArray = classData.getDirectMethods();
-        for(MethodDef methodDef : defArray.getChildes()){
-            cleanKotlinIntrinsics(methodDef);
-        }
-        defArray = classData.getVirtualMethods();
-        for(MethodDef methodDef : defArray.getChildes()){
-            cleanKotlinIntrinsics(methodDef);
-        }
-    }
-    private void cleanKotlinIntrinsics(MethodDef methodDef){
-        InstructionList instructionList = methodDef.getInstructionList();
-        if(instructionList == null || methodDef.getCodeItem().getTryBlock() != null){
-            return;
-        }
-        Ins previous = null;
-        List<Ins> insList = CollectionUtil.toList(instructionList.iterator());
-        for(Ins ins : insList) {
-            if(ins.toString().contains("Lkotlin/jvm/internal/Intrinsics;->f(Ljava/lang/Object;Ljava/lang/String;)V")){
-                if(previous != null && previous.toString().contains("const-string")){
-                    instructionList.remove(previous);
-                    instructionList.remove(ins);
-                    previous = null;
-                    continue;
-                }
+    private void searchRequired(Set<DexClass> results){
+        DexClassRepository dexClassRepository = getClassRepository();
+        Iterator<TypeKey> iterator = usedTypes();
+        while (iterator.hasNext()){
+            TypeKey typeKey = iterator.next();
+            DexClass dexClass = dexClassRepository.getDexClass(typeKey);
+            if(dexClass == null || results.contains(dexClass)){
+                continue;
             }
-            if(!ins.toString().contains("move-")){
-                previous = ins;
-            }
+            results.add(dexClass);
+            dexClass.searchRequired(results);
         }
     }
-    private void cleanKotlinAnnotation(){
-        ClassId classId = getClassId();
-        AnnotationSet annotationSet = classId.getClassAnnotations();
-        if(annotationSet == null){
-            return;
-        }
-        List<AnnotationItem> annotationItems = getKotlin();
-        if(annotationItems.isEmpty()){
-            return;
-        }
-        AnnotationsDirectory directory = classId.getUniqueAnnotationsDirectory();
-        annotationSet = directory.getClassAnnotations();
-        for(AnnotationItem annotationItem : annotationItems){
-            annotationSet.remove(annotationItem);
-        }
-        if(annotationSet.size() !=  0){
-            return;
-        }
-        classId.setClassAnnotations(null);
-    }
-    private List<AnnotationItem> getKotlin(){
-        ClassId classId = getClassId();
-        AnnotationSet annotationSet = classId.getClassAnnotations();
-        if(annotationSet == null){
-            return EmptyList.of();
-        }
-        Iterator<AnnotationItem> iterator = annotationSet.iterator();
-        iterator = FilterIterator.of(iterator, new Predicate<AnnotationItem>() {
+    public Iterator<TypeKey> usedTypes(){
+        Iterator<Key> iterator = ComputeIterator.of(getId().usedIds(), IdItem::getKey);
+        Iterator<Key> mentioned = new IterableIterator<Key, Key>(iterator) {
+            @SuppressWarnings("unchecked")
             @Override
-            public boolean test(AnnotationItem item) {
-                String type = item.getTypeId().getName();
-                return "Lkotlin/Metadata;".equals(type);
+            public Iterator<Key> iterator(Key element) {
+                return (Iterator<Key>) element.mentionedKeys();
             }
-        });
-        return CollectionUtil.toList(iterator);
+        };
+        return InstanceIterator.of(mentioned, TypeKey.class);
     }
-    ///////////////////////////////////////////
-    public DexField getField(String fieldKey) {
-        DexField dexField = getDefinedField(fieldKey);
+    public DexMethod getStaticConstructor(){
+        MethodKey methodKey = MethodKey.STATIC_CONSTRUCTOR
+                .changeDeclaring(getDefining());
+        return getDeclaredMethod(methodKey);
+    }
+    public DexField getField(FieldKey fieldKey) {
+        if(!isAccessibleTo(fieldKey.getDeclaring())){
+            return null;
+        }
+        DexField dexField = getDeclaredField(fieldKey);
         if(dexField != null) {
             return dexField;
         }
-        Iterator<DexClass> iterator = getSuperClasses();
-        while (iterator.hasNext()) {
-            DexClass dexClass = iterator.next();
-            dexField = dexClass.getDefinedField(fieldKey);
-            if(dexField == null){
-                continue;
+        DexClass superClass = getSuperClass();
+        if (superClass != null){
+            dexField = superClass.getField(fieldKey);
+            if(dexField != null){
+                if(dexField.isAccessibleTo(getDefining())){
+                    return dexField;
+                }else {
+                    return null;
+                }
             }
-            if(dexField.isAccessibleTo(this)) {
-                return dexField;
+        }
+        Iterator<DexClass> iterator = getInterfaceClasses();
+        while (iterator.hasNext()) {
+            dexField = iterator.next().getField(fieldKey);
+            if(dexField != null){
+                if(dexField.isAccessibleTo(getDefining())){
+                    return dexField;
+                }
             }
         }
         return null;
     }
-    public DexField getDefinedField(String fieldKey) {
-        Iterator<DexField> iterator = getFields();
+    public DexField getDeclaredField(FieldKey fieldKey) {
+        Iterator<DexField> iterator = getDeclaredFields();
         while (iterator.hasNext()){
             DexField dexField = iterator.next();
-            if(fieldKey.equals(dexField.getKey())){
+            if(fieldKey.equals(dexField.getKey(), false, true)){
                 return dexField;
             }
         }
         return null;
     }
-    public DexMethod getMethod(String methodKey) {
-        DexMethod dexMethod = getDefinedMethod(methodKey);
+    public DexMethod getMethod(MethodKey methodKey) {
+        DexMethod dexMethod = getDeclaredMethod(methodKey);
         if(dexMethod != null) {
             return dexMethod;
         }
-        Iterator<DexClass> iterator = getSuperClasses();
+        Iterator<DexClass> iterator = getSuperTypes();
         while (iterator.hasNext()) {
             DexClass dexClass = iterator.next();
-            dexMethod = dexClass.getDefinedMethod(methodKey);
+            dexMethod = dexClass.getDeclaredMethod(methodKey);
             if(dexMethod == null){
                 continue;
             }
-            if(!dexMethod.isAccessibleTo(this)) {
+            if(!dexMethod.isAccessibleTo(methodKey.getDeclaring())) {
                 // TODO: should not reach here ?
                 continue;
             }
@@ -190,53 +143,105 @@ public class DexClass extends DexDef implements Comparable<DexClass> {
         }
         return null;
     }
-    public DexMethod getDefinedMethod(String methodKey) {
-        Iterator<DexMethod> iterator = getMethods();
+    public Iterator<DexMethod> getMethods(MethodKey methodKey) {
+        return CombiningIterator.two(getDeclaredMethods(methodKey),
+                ComputeIterator.of(getSuperTypes(), dexClass -> {
+                    DexMethod method = dexClass.getDeclaredMethod(methodKey);
+                    if (method != null && method.isAccessibleTo(methodKey.getDeclaring())) {
+                        return method;
+                    }
+                    return null;
+                }));
+    }
+    public Iterator<DexMethod> getExtending(MethodKey methodKey) {
+        return CombiningIterator.of(getDeclaredMethod(methodKey),
+                ComputeIterator.of(getExtending(),
+                        dexClass -> dexClass.getExtending(methodKey)));
+    }
+    public Iterator<DexMethod> getImplementations(MethodKey methodKey) {
+        return CombiningIterator.of(getDeclaredMethod(methodKey),
+         ComputeIterator.of(getImplementations(),
+                dexClass -> dexClass.getImplementations(methodKey)));
+    }
+    public Iterator<MethodKey> getOverridingKeys(MethodKey methodKey) {
+        MethodKey key = methodKey.changeDeclaring(getKey());
+        return CombiningIterator.of(CombiningIterator.singleOne(
+                key,
+                SingleIterator.of(getBridgedMethod(methodKey))
+                ),
+                ComputeIterator.of(getOverriding(),
+                        dexClass -> dexClass.getOverridingKeys(key)));
+    }
+    private MethodKey getBridgedMethod(MethodKey methodKey){
+        DexMethod dexMethod = getDeclaredMethod(methodKey);
+        if(dexMethod == null){
+            return null;
+        }
+        dexMethod = dexMethod.getBridged();
+        if(dexMethod == null){
+            return null;
+        }
+        return dexMethod.getKey();
+    }
+    public boolean containsDeclaredMethod(MethodKey methodKey) {
+        Iterator<DexMethod> iterator = getDeclaredMethods();
         while (iterator.hasNext()){
             DexMethod dexMethod = iterator.next();
-            if(methodKey.equals(dexMethod.getKey())){
+            MethodKey key = dexMethod.getKey();
+            if(methodKey.equals(key, false, false)){
+                return true;
+            }
+        }
+        return false;
+    }
+    public DexMethod getDeclaredMethod(MethodKey methodKey) {
+        Iterator<DexMethod> iterator = getDeclaredMethods();
+        while (iterator.hasNext()){
+            DexMethod dexMethod = iterator.next();
+            MethodKey key = dexMethod.getKey();
+            if(methodKey.equals(key, false, false)){
                 return dexMethod;
             }
         }
         return null;
     }
-    public Iterator<DexClass> getSuperClasses(){
-        return listSuperClasses().iterator();
+    public Iterator<DexMethod> getDeclaredMethods(MethodKey methodKey) {
+        return FilterIterator.of(getDeclaredMethods(),
+                dexMethod -> methodKey.equals(dexMethod.getKey(), false, false));
     }
-    public Set<DexClass> listSuperClasses(){
-        Set<DexClass> results = new HashSet<>();
-        listSuperClasses(results);
-        return results;
+    public Iterator<DexClass> getOverridingAndSuperTypes(){
+        return CombiningIterator.two(getOverriding(), getSuperTypes());
     }
-    private void listSuperClasses(Set<DexClass> results) {
-        DexClass dexClass = getSuperClass();
-        if(dexClass != null && !results.contains(dexClass)){
-            results.add(dexClass);
-            dexClass.listSuperClasses(results);
-        }
-        Iterator<String> interfaceNames = getInterfaces();
-        while (interfaceNames.hasNext()){
-            dexClass = dexFile.get(interfaceNames.next());
-            if(dexClass != null && !results.contains(dexClass)){
-                results.add(dexClass);
-                dexClass.listSuperClasses(results);
+    public Iterator<DexClass> getSuperTypes(){
+        final TypeKey overflow = getDefining();
+        Iterator<DexClass> iterator = CombiningIterator.two(SingleIterator.of(getSuperClass()),
+                getInterfaceClasses());
+        return new IterableIterator<DexClass, DexClass>(iterator) {
+            @Override
+            public Iterator<DexClass> iterator(DexClass element) {
+                if(overflow.equals(element.getDefining())){
+                    throw new IllegalArgumentException("Recursive class super: " + overflow);
+                }
+                return CombiningIterator.two(SingleIterator.of(element), element.getSuperTypes());
             }
-        }
+        };
+    }
+    public Iterator<DexClass> getOverriding(){
+        return CombiningIterator.two(getExtending(), getImplementations());
+    }
+    public Iterator<DexClass> getExtending(){
+        return getDexFile().searchExtending(getKey());
+    }
+    public Iterator<DexClass> getImplementations(){
+        return getDexFile().searchImplementations(getKey());
+    }
+    public DexClass getSuperClass() {
+        return search(getSuperClassKey());
+    }
+    public Iterator<DexField> getDeclaredFields() {
+        return CombiningIterator.two(getStaticFields(), getInstanceFields());
     }
 
-    public DexClass getSuperClass() {
-        return dexFile.get(getSuperClassName());
-    }
-    public Iterator<DexField> getFields() {
-        return new CombiningIterator<>(getStaticFields(), getInstanceFields());
-    }
-    FieldDef getStatic(FieldKey fieldKey){
-        ClassData classData = getClassData();
-        if(classData != null){
-            return classData.getStaticFields().get(fieldKey);
-        }
-        return null;
-    }
     public DexField getOrCreateStaticField(FieldKey fieldKey){
         return createField(getOrCreateStatic(fieldKey));
     }
@@ -245,125 +250,130 @@ public class DexClass extends DexDef implements Comparable<DexClass> {
     }
     public Iterator<? extends DexField> getStaticFields() {
         ClassData classData = getClassData();
-        if(classData != null){
-            return ComputeIterator.of(classData
-                    .getStaticFields().iterator(), this::createField);
+        if(classData == null){
+            return EmptyIterator.of();
         }
-        return EmptyIterator.of();
+        return ComputeIterator.of(classData.getStaticFields(), this::createField);
     }
     public Iterator<DexField> getInstanceFields() {
-        return ComputeIterator.of(getClassData()
-                .getInstanceFields().iterator(), this::createField);
+        ClassData classData = getClassData();
+        if(classData == null){
+            return EmptyIterator.of();
+        }
+        return ComputeIterator.of(classData.getInstanceFields(), this::createField);
     }
-    public Iterator<DexMethod> getMethods() {
+    public Iterator<DexMethod> getDeclaredMethods() {
         return new CombiningIterator<>(getDirectMethods(), getVirtualMethods());
     }
     public Iterator<DexMethod> getDirectMethods() {
-        return ComputeIterator.of(getClassData()
-                .getDirectMethods().iterator(), this::createMethod);
+        ClassData classData = getClassData();
+        if(classData == null){
+            return EmptyIterator.of();
+        }
+        return ComputeIterator.of(classData.getDirectMethods(), this::createMethod);
     }
     public Iterator<DexMethod> getVirtualMethods() {
-        return ComputeIterator.of(getClassData()
-                .getVirtualMethods().iterator(), this::createMethod);
+        ClassData classData = getClassData();
+        if(classData == null){
+            return EmptyIterator.of();
+        }
+        return ComputeIterator.of(classData.getVirtualMethods(), this::createMethod);
+    }
+    public DexMethod getOrCreateDirectMethod(MethodKey methodKey){
+        return createMethod(getOrCreateClassData().getOrCreateDirect(methodKey));
+    }
+    public DexMethod getOrCreateVirtualMethod(MethodKey methodKey){
+        return createMethod(getOrCreateClassData().getOrCreateVirtual(methodKey));
+    }
+    public DexMethod getOrCreateStaticMethod(MethodKey methodKey){
+        DexMethod dexMethod = createMethod(getOrCreateClassData().getOrCreateDirect(methodKey));
+        MethodDef methodDef = dexMethod.getDefinition();
+        methodDef.addAccessFlag(AccessFlag.STATIC);
+        return dexMethod;
     }
 
     DexField createField(FieldDef fieldDef){
-        fieldDef.setClassId(getClassId());
         return new DexField(this, fieldDef);
     }
     DexMethod createMethod(MethodDef methodDef){
         return new DexMethod(this, methodDef);
     }
 
-    @Override
-    public String getAccessFlags() {
-        return AccessFlag.formatForClass(getAccessFlagsValue());
+    public boolean isInterface() {
+        return AccessFlag.INTERFACE.isSet(getAccessFlagsValue());
     }
-    @Override
-    int getAccessFlagsValue() {
-        return getClassId().getAccessFlagsValue();
-    }
-
-    public void decode(File outDir) throws IOException {
+    public void decode(SmaliWriter writer, File outDir) throws IOException {
         File file = new File(outDir, toFilePath());
         File dir = file.getParentFile();
         if(dir != null && !dir.exists() && !dir.mkdirs()){
             throw new IOException("Failed to create dir: " + dir);
         }
         FileOutputStream outputStream = new FileOutputStream(file);
-        SmaliWriter writer = new SmaliWriter(new OutputStreamWriter(outputStream));
+        writer.setWriter(new OutputStreamWriter(outputStream));
         append(writer);
         writer.close();
         outputStream.close();
     }
     private String toFilePath(){
-        String name = getClassName();
+        String name = getDefining().getTypeName();
         name = name.substring(1, name.length()-1);
         name = name.replace('/', File.separatorChar);
         return name + ".smali";
     }
 
+    @Override
     public DexFile getDexFile() {
         return dexFile;
     }
-    public void addAccessFlag(AccessFlag accessFlag){
-        getClassId().addAccessFlag(accessFlag);
-    }
-    public ClassId getClassId() {
+    @Override
+    public ClassId getId() {
         return classId;
     }
     @Override
-    public String getKey() {
-        return getClassName();
+    public DexClass getDexClass(){
+        return this;
     }
     @Override
-    public String getClassName() {
-        return getClassId().getName();
+    public TypeKey getKey() {
+        return getId().getKey();
     }
-    public String getSuperClassName(){
-        return getClassId().getSuperClass().getName();
+    @Override
+    public ClassId getDefinition(){
+        return getId();
     }
-    public void setSuperClass(String superClass){
-        getClassId().setSuperClass(superClass);
+
+    public TypeKey getSuperClassKey(){
+        return getId().getSuperClassKey();
     }
-    public String getSourceFile(){
-        StringData stringData = getClassId().getSourceFile();
-        if(stringData != null){
-            return stringData.getString();
-        }
-        return null;
+    public void setSuperClass(TypeKey superClass){
+        getId().setSuperClass(superClass);
+    }
+    public String getSourceFileName(){
+        return getId().getSourceFileName();
     }
     public void setSourceFile(String sourceFile){
-        getClassId().setSourceFile(sourceFile);
+        getId().setSourceFile(sourceFile);
     }
 
     public Iterator<DexClass> getInterfaceClasses(){
-        return ComputeIterator.of(getInterfaces(), DexClass.this.dexFile::get);
+        return ComputeIterator.of(getInterfaces(), this::search);
     }
-    public Iterator<String> getInterfaces(){
-        TypeList typeList = getClassId().getInterfaces();
-        if(typeList != null){
-            return typeList.getTypeNames();
-        }
-        return EmptyIterator.of();
+    DexClass search(TypeKey typeKey){
+        return getClassRepository().getDexClass(typeKey);
+    }
+    public Iterator<TypeKey> getInterfaces(){
+        return getId().getInterfaceKeys();
     }
     public void addInterface(String typeName) {
-        ItemOffsetReference<TypeList> reference = getClassId().getInterfacesReference();
-        TypeList typeList = reference.getOrCreate();
-        typeList.add(typeName);
-    }
-    public void addInterfaces(Iterator<String> iterator){
-        ItemOffsetReference<TypeList> reference = getClassId().getInterfacesReference();
-        TypeList typeList = reference.getOrCreate();
-        typeList.addAll(iterator);
+        TypeListReference reference = getId().getInterfacesReference();
+        reference.add(typeName);
     }
     public void clearInterfaces() {
-        ItemOffsetReference<TypeList> reference = getClassId().getInterfacesReference();
-        reference.setItem(null);
+        TypeListReference reference = getId().getInterfacesReference();
+        reference.setItem((TypeList) null);
     }
-
     public void removeAnnotations(Predicate<AnnotationItem> filter) {
-        ClassId classId = getClassId();
+        ClassId classId = getId();
         AnnotationSet annotationSet = classId.getClassAnnotations();
         if(annotationSet == null) {
             return;
@@ -373,52 +383,150 @@ public class DexClass extends DexDef implements Comparable<DexClass> {
         if(annotationSet.size() == 0){
             annotationSet.removeSelf();
             classId.setClassAnnotations(null);
-            AnnotationsDirectory directory = getClassId().getAnnotationsDirectory();
+            AnnotationsDirectory directory = getId().getAnnotationsDirectory();
             if(directory != null && directory.isEmpty()){
                 directory.removeSelf();
                 classId.setAnnotationsDirectory(null);
             }
         }
-        getClassId().refresh();
+        getId().refresh();
     }
-    public AnnotationSet getAnnotations(){
-        return getClassId().getClassAnnotations();
-    }
-
-    ClassData getOrCreateClassData(){
-        return getClassId().getOrCreateClassData();
-    }
-    ClassData getClassData(){
-        ClassId classId = getClassId();
-        ClassData classData = classId.getClassData();
-        if(classData != null){
-            classData.setClassId(classId);
+    public void fixDalvikInnerClassName(){
+        AnnotationItem annotationItem = getDalvikInnerClassAnnotation();
+        if(annotationItem == null){
+            return;
         }
-        return classData;
+        AnnotationElement element = annotationItem.getElement("name");
+        if(element == null){
+            return;
+        }
+        DexValueBlock<?> valueBlock = element.getValue();
+        if(!valueBlock.is(DexValueType.STRING)){
+            return;
+        }
+        TypeKey typeKey = getKey();
+        if(!typeKey.isInnerName()){
+            element.setValue(new NullValue());
+            return;
+        }
+        StringValue value = (StringValue) valueBlock;
+        value.setString(typeKey.getSimpleInnerName());
     }
-    EncodedArray getStaticValues(){
-        return getClassId().getStaticValues();
+    public List<Key> fixAccessibility(){
+        DexClassRepository repository = getClassRepository();
+        if(repository == null){
+            return ArrayCollection.empty();
+        }
+        List<Key> results = new ArrayCollection<>();
+        ClassId classId = getId();
+        Set<Key> checked = new HashSet<>();
+        checked.add(classId.getKey());
+        Iterator<IdItem> iterator = classId.usedIds();
+        while (iterator.hasNext()){
+            Key key = iterator.next().getKey();
+            if(checked.add(key)){
+                if(fixAccessibility(repository.getDexDeclaration(key))){
+                    results.add(key);
+                }
+            }
+        }
+        return results;
     }
-    AnnotationsDirectory getAnnotationsDirectory(){
-        return getClassId().getAnnotationsDirectory();
+    private boolean fixAccessibility(DexDeclaration declaration){
+        if(declaration != null && !declaration.isAccessibleTo(this)){
+            declaration.addAccessFlag(AccessFlag.PUBLIC);
+            return true;
+        }
+        return false;
     }
-
-
-
-    public void refresh() {
+    public TypeKey getDalvikEnclosingClass(){
+        Key key = getId().getDalvikEnclosing();
+        if(key != null){
+            return key.getDeclaring();
+        }
+        return null;
+    }
+    public AnnotationItem getDalvikInnerClassAnnotation(){
+        return getId().getDalvikInnerClass();
     }
 
     @Override
+    public Iterator<AnnotationItem> getAnnotations(){
+        AnnotationSet annotationSet = getAnnotationSet();
+        if(annotationSet != null){
+            return annotationSet.iterator();
+        }
+        return EmptyIterator.of();
+    }
+    @Override
+    public Iterator<AnnotationItem> getAnnotations(TypeKey typeKey){
+        AnnotationSet annotationSet = getAnnotationSet();
+        if(annotationSet != null){
+            return annotationSet.getAll(typeKey);
+        }
+        return EmptyIterator.of();
+    }
+    @Override
+    public AnnotationItem getAnnotation(TypeKey typeKey){
+        AnnotationSet annotationSet = getAnnotationSet();
+        if(annotationSet != null){
+            return annotationSet.get(typeKey);
+        }
+        return null;
+    }
+    public AnnotationSet getAnnotationSet(){
+        return getId().getClassAnnotations();
+    }
+
+    ClassData getOrCreateClassData(){
+        return getId().getOrCreateClassData();
+    }
+    ClassData getClassData(){
+        return getId().getClassData();
+    }
+    EncodedArray getStaticValues(){
+        return getId().getStaticValues();
+    }
+    AnnotationsDirectory getAnnotationsDirectory(){
+        return getId().getAnnotationsDirectory();
+    }
+
+    public void edit(){
+        getId().edit();
+    }
+    @Override
     public int compareTo(DexClass dexClass) {
-        String name1 = getClassName();
-        if(name1 == null){
-            name1 = "null";
-        }
-        String name2 = dexClass.getClassName();
-        if(name2 == null){
-            name2 = "null";
-        }
-        return name1.compareTo(name2);
+        return getKey().compareTo(dexClass.getKey());
+    }
+    @Override
+    public void append(SmaliWriter writer) throws IOException {
+        getClassData();
+        getId().append(writer);
+    }
+    public void writeSmali(SmaliWriter writer, File dir) throws IOException {
+        File file = toSmaliFile(dir);
+        FileUtil.writeUtf8(file, toSmali(writer));
+    }
+    public File toSmaliFile(File dir){
+        return new File(dir, buildSmaliPath());
+    }
+    public String buildSmaliPath(){
+        String type = getKey().getTypeName();
+        type = type.substring(1, type.length() - 1);
+        type = type.replace('/', File.separatorChar);
+        type = type + ".smali";
+        return type;
+    }
+    public String toSmali() throws IOException {
+        return SmaliWriter.toString(this);
+    }
+    public String toSmali(SmaliWriter writer) throws IOException {
+        return SmaliWriter.toString(writer,this);
+    }
+
+    @Override
+    public int hashCode() {
+        return getKey().hashCode();
     }
     @Override
     public boolean equals(Object obj) {
@@ -429,23 +537,14 @@ public class DexClass extends DexDef implements Comparable<DexClass> {
             return false;
         }
         DexClass dexClass = (DexClass) obj;
-        return Objects.equals(getClassName(), dexClass.getClassName());
+        if(!isInSameFile(dexClass)){
+            return false;
+        }
+        return getKey().equals(dexClass.getKey());
     }
-    @Override
-    public void append(SmaliWriter writer) throws IOException {
-        getClassData();
-        getClassId().append(writer);
-    }
+
     @Override
     public String toString() {
-        StringWriter writer = new StringWriter();
-        SmaliWriter smaliWriter = new SmaliWriter(writer);
-        try {
-            append(smaliWriter);
-            smaliWriter.close();
-        } catch (IOException exception) {
-            return exception.toString();
-        }
-        return writer.toString();
+        return SmaliWriter.toStringSafe(this);
     }
 }

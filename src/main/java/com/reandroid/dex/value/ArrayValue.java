@@ -15,30 +15,25 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.arsc.item.IntegerVisitor;
-import com.reandroid.arsc.item.VisitableInteger;
-import com.reandroid.dex.item.EncodedArray;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.data.EncodedArray;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.key.Key;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliValue;
+import com.reandroid.dex.smali.model.SmaliValueArray;
+import com.reandroid.utils.collection.IterableIterator;
 
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.function.Predicate;
 
 public class ArrayValue extends DexValueBlock<EncodedArray>
-        implements Iterable<DexValueBlock<?>>, VisitableInteger {
+        implements Iterable<DexValueBlock<?>> {
 
     public ArrayValue() {
         super(new EncodedArray(), DexValueType.ARRAY);
     }
 
-    @Override
-    public void visitIntegers(IntegerVisitor visitor) {
-        for(DexValueBlock<?> dexValue : this){
-            if(dexValue instanceof VisitableInteger){
-                ((VisitableInteger)dexValue).visitIntegers(visitor);
-            }
-        }
-    }
     public DexValueBlock<?> get(int i){
         return getValueContainer().get(i);
     }
@@ -70,16 +65,39 @@ public class ArrayValue extends DexValueBlock<EncodedArray>
     public DexValueType<?> getValueType() {
         return DexValueType.ARRAY;
     }
+
     @Override
-    public String getTypeName(){
-        StringBuilder builder = new StringBuilder();
-        builder.append('[');
-        Iterator<DexValueBlock<?>> iterator = iterator();
-        if(iterator.hasNext()){
-            builder.append(iterator.next().getTypeName());
-        }
-        return builder.toString();
+    public Iterator<IdItem> usedIds(){
+        return new IterableIterator<DexValueBlock<?>, IdItem>(iterator()) {
+            @Override
+            public Iterator<IdItem> iterator(DexValueBlock<?> element) {
+                return element.usedIds();
+            }
+        };
     }
+    @Override
+    public void replaceKeys(Key search, Key replace) {
+        for(DexValueBlock<?> valueBlock : this){
+            valueBlock.replaceKeys(search, replace);
+        }
+    }
+
+    @Override
+    public void merge(DexValueBlock<?> valueBlock){
+        super.merge(valueBlock);
+        ArrayValue coming = (ArrayValue) valueBlock;
+        getValueContainer().merge(coming.getValueContainer());
+    }
+
+    @Override
+    public void fromSmali(SmaliValue smaliValue) {
+        SmaliValueArray smaliValueArray = (SmaliValueArray) smaliValue;
+        for (SmaliValue smaliValueChild : smaliValueArray) {
+            DexValueBlock<?> value = createNext(smaliValueChild.getValueType());
+            value.fromSmali(smaliValueChild);
+        }
+    }
+
     @Override
     public void append(SmaliWriter writer) throws IOException {
         writer.append('{');

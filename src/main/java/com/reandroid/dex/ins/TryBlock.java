@@ -16,43 +16,82 @@
 package com.reandroid.dex.ins;
 
 import com.reandroid.arsc.base.Creator;
+import com.reandroid.arsc.container.BlockList;
 import com.reandroid.arsc.io.BlockReader;
 import com.reandroid.arsc.item.ByteArray;
-import com.reandroid.arsc.item.IntegerReference;
-import com.reandroid.dex.base.CountedArray;
-import com.reandroid.dex.base.DexBlockAlign;
 import com.reandroid.dex.base.DexPositionAlign;
 import com.reandroid.dex.base.Ule128Item;
-import com.reandroid.dex.item.DexContainerItem;
+import com.reandroid.dex.data.CodeItem;
+import com.reandroid.dex.data.FixedDexContainerWithTool;
+import com.reandroid.dex.data.InstructionList;
+import com.reandroid.dex.smali.SmaliDirective;
+import com.reandroid.dex.smali.model.SmaliCodeExceptionHandler;
+import com.reandroid.dex.smali.model.SmaliCodeTryItem;
 import com.reandroid.utils.collection.EmptyIterator;
 import com.reandroid.utils.collection.ExpandIterator;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Objects;
 
-public class TryBlock extends DexContainerItem implements
+public class TryBlock extends FixedDexContainerWithTool implements
         Creator<TryItem>, Iterable<TryItem>, LabelsSet {
-    private final IntegerReference totalCount;
 
+    private final CodeItem codeItem;
     private HandlerOffsetArray handlerOffsetArray;
     private Ule128Item tryItemsCount;
     private ByteArray unknownBytes;
-    private CountedArray<TryItem> tryItemArray;
+    private BlockList<TryItem> tryItemArray;
     private DexPositionAlign positionAlign;
 
-    public TryBlock(IntegerReference totalCount) {
+    public TryBlock(CodeItem codeItem) {
         super(5);
-        this.totalCount = totalCount;
+        this.codeItem = codeItem;
     }
 
+    InstructionList getInstructionList(){
+        return getCodeItem().getInstructionList();
+    }
+    private CodeItem getCodeItem(){
+        return codeItem;
+    }
     public int getTryItemCount() {
+        if(isNull()){
+            return 0;
+        }
         return tryItemArray.getCount();
+    }
+    public int getRealTryItemCount(){
+        BlockList<TryItem> array = this.tryItemArray;
+        if(array == null){
+            return 0;
+        }
+        int count = 0;
+        int size = array.size();
+        for(int i = 0; i < size; i++){
+            TryItem tryItem = array.get(i);
+            if(!tryItem.isCopy()){
+                count ++;
+            }
+        }
+        return count;
     }
     @Override
     public Iterator<? extends Label> getLabels() {
         return new ExpandIterator<>(iterator());
     }
 
+    public void add(TryItem tryItem){
+        if(tryItemArray != null){
+            tryItemArray.add(tryItem);
+        }
+    }
+    public TryItem get(int i){
+        if(tryItemArray != null){
+            return tryItemArray.get(i);
+        }
+        return null;
+    }
     @Override
     public Iterator<TryItem> iterator(){
         if(isNull()){
@@ -64,20 +103,28 @@ public class TryBlock extends DexContainerItem implements
     @Override
     protected void onRefreshed() {
         super.onRefreshed();
-        updateHandlerOffsets();
-        DexPositionAlign positionAlign = this.positionAlign;
-        if(positionAlign != null){
-            positionAlign.align(this);
+        if(isNull()){
+            return;
         }
+        updateHandlerOffsets();
+        updateCount();
+        positionAlign.align(this);
+    }
+    private void updateCount(){
+        if(isNull()){
+            return;
+        }
+        this.tryItemsCount.set(getRealTryItemCount());
     }
     private void updateHandlerOffsets(){
-        CountedArray<TryItem> array = this.tryItemArray;
+        BlockList<TryItem> array = this.tryItemArray;
         if(array == null){
             return;
         }
         int baseOffset = this.tryItemsCount.countBytes();
         HandlerOffsetArray offsetArray = this.handlerOffsetArray;
         int size = array.getCount();
+        offsetArray.setSize(size);
         for(int i = 0; i < size; i++){
             TryItem item = array.get(i);
             HandlerOffset offset = offsetArray.get(i);
@@ -89,7 +136,7 @@ public class TryBlock extends DexContainerItem implements
 
     private HandlerOffsetArray initHandlersOffset() {
         if(handlerOffsetArray == null){
-            handlerOffsetArray = new HandlerOffsetArray(totalCount);
+            handlerOffsetArray = new HandlerOffsetArray(getCodeItem().getTryCountReference());
             addChild(INDEX_offsetArray, handlerOffsetArray);
         }
         return handlerOffsetArray;
@@ -100,7 +147,7 @@ public class TryBlock extends DexContainerItem implements
         }
         tryItemsCount = new Ule128Item();
         addChild(INDEX_itemsCount, tryItemsCount);
-        tryItemArray = new CountedArray<>(totalCount, this);
+        tryItemArray = new BlockList<>(this);
         addChild(INDEX_itemArray, tryItemArray);
     }
     @Override
@@ -155,9 +202,31 @@ public class TryBlock extends DexContainerItem implements
         return tryItemArray == null;
     }
 
+    public void onRemove(){
+        BlockList<TryItem> tryItemArray = this.tryItemArray;
+        if(tryItemArray != null){
+            this.tryItemArray = null;
+            int count = tryItemArray.getCount();
+            for(int i = 0; i < count; i++){
+                TryItem tryItem = tryItemArray.getLast();
+                tryItem.onRemove();
+            }
+            tryItemArray.clearChildes();
+        }
+        HandlerOffsetArray array = this.handlerOffsetArray;
+        if(array != null){
+            array.setSize(0);
+            this.handlerOffsetArray = null;
+        }
+        DexPositionAlign positionAlign = this.positionAlign;
+        if(positionAlign != null){
+            this.positionAlign = null;
+        }
+    }
+
     @Override
     public void onReadBytes(BlockReader reader) throws IOException {
-        boolean is_null = totalCount.get() == 0;
+        boolean is_null = getCodeItem().getTryCountReference().get() == 0;
         setNull(is_null);
         if(is_null){
             return;
@@ -165,7 +234,8 @@ public class TryBlock extends DexContainerItem implements
         this.handlerOffsetArray.onReadBytes(reader);
         this.tryItemsCount.onReadBytes(reader);
         readUnknownBytes(reader);
-        this.tryItemArray.onReadBytes(reader);
+        this.tryItemArray.setSize(handlerOffsetArray.size());
+        this.tryItemArray.readChildes(reader);
         this.positionAlign.onReadBytes(reader);
     }
     private void setUnknownBytes(int count) {
@@ -202,8 +272,7 @@ public class TryBlock extends DexContainerItem implements
     public DexPositionAlign getPositionAlign(){
         return positionAlign;
     }
-    @Override
-    public TryItem[] newInstance(int length) {
+    public TryItem[] newArrayInstanceOld(int length) {
         HandlerOffsetArray offsetArray = initHandlersOffset();
         int count = offsetArray.size();
         TryItem[] results = new TryItem[length];
@@ -228,6 +297,94 @@ public class TryBlock extends DexContainerItem implements
     @Override
     public TryItem newInstance() {
         return new TryItem(initHandlersOffset());
+    }
+    public TryItem[] newArrayInstance(int length) {
+        return new TryItem[length];
+    }
+    @Override
+    public TryItem newInstanceAt(int index) {
+        BlockList<TryItem> tryItemArray = this.tryItemArray;
+        HandlerOffsetArray offsetArray = initHandlersOffset();
+        if(tryItemArray.size() < 2){
+            return new TryItem(offsetArray);
+        }
+        int offset = offsetArray.getOffset(index);
+        int i = offsetArray.indexOf(offset);
+        TryItem tryItem = null;
+        if(i >= 0 && i < index){
+            tryItem = tryItemArray.get(i);
+            if(tryItem != null){
+                tryItem = tryItem.newCopy();
+            }
+        }
+        if(tryItem == null){
+            tryItem = new TryItem(offsetArray);
+        }
+        return tryItem;
+    }
+
+    public void merge(TryBlock tryBlock){
+        boolean is_null = tryBlock.isNull();
+        setNull(is_null);
+        if(is_null){
+            return;
+        }
+        int count = tryBlock.getTryItemCount();
+        for(int i = 0; i < count; i++){
+            TryItem coming = tryBlock.get(i);
+            TryItem comingSource = coming.getTryItem();
+            TryItem tryItem;
+            if(coming != comingSource){
+                tryItem = get(comingSource.getIndex()).newCopy();
+            }else {
+                tryItem = newInstance();
+            }
+            add(tryItem);
+            tryItem.merge(coming);
+        }
+        updateHandlerOffsets();
+        updateCount();
+    }
+    public void fromSmali(SmaliCodeTryItem smaliCodeTryItem){
+        initialize();
+        TryItem tryItem = newInstance();
+        add(tryItem);
+        initHandlersOffset().setSize(tryItemArray.size());
+        tryItem.fromSmali(smaliCodeTryItem);
+        updateHandlerOffsets();
+        updateCount();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        TryBlock tryBlock = (TryBlock) obj;
+        if(isNull()){
+            return tryBlock.isNull();
+        }
+        return Objects.equals(handlerOffsetArray, tryBlock.handlerOffsetArray) &&
+                Objects.equals(tryItemArray, tryBlock.tryItemArray);
+    }
+
+    @Override
+    public int hashCode() {
+        int hash = 1;
+        Object obj = handlerOffsetArray;
+        hash = hash * 31;
+        if(obj != null){
+            hash = hash + obj.hashCode();
+        }
+        obj = tryItemArray;
+        hash = hash * 31;
+        if(obj != null){
+            hash = hash + obj.hashCode();
+        }
+        return hash;
     }
 
     @Override

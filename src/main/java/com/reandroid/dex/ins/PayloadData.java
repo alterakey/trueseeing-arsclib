@@ -15,13 +15,42 @@
  */
 package com.reandroid.dex.ins;
 
+import com.reandroid.arsc.base.Block;
 import com.reandroid.arsc.item.ShortItem;
+import com.reandroid.dex.smali.SmaliRegion;
+import com.reandroid.dex.smali.model.SmaliInstruction;
 
-public class PayloadData extends Ins {
+import java.io.IOException;
+
+public abstract class PayloadData extends Ins implements SmaliRegion {
+
     public PayloadData(int childesCount, Opcode<?> opcode) {
         super(childesCount + 1, opcode);
         ShortItem opcodeItem = new ShortItem();
         opcodeItem.set(opcode.getValue());
         addChild(0, opcodeItem);
+    }
+
+    @Override
+    public abstract void fromSmali(SmaliInstruction smaliInstruction) throws IOException;
+
+    @Override
+    public boolean equals(Object obj) {
+        if(obj == this){
+            return true;
+        }
+        if(obj == null || getClass() != obj.getClass()){
+            return false;
+        }
+        PayloadData payloadData = (PayloadData) obj;
+        if(getIndex() != payloadData.getIndex()){
+            return false;
+        }
+        return Block.areEqual(getChildes(), payloadData.getChildes());
+    }
+
+    @Override
+    public int hashCode() {
+        return Block.hashCodeOf(getChildes()) + getIndex();
     }
 }

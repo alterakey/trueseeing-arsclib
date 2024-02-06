@@ -20,11 +20,11 @@ public class ResXmlDocumentTest {
         ResXmlDocument document = new ResXmlDocument();
         ResXmlElement root = document.getOrCreateElement("manifest");
         ResXmlElement child = root.createChildElement("child");
-        child.setTagNamespace(ResourceLibrary.URI_RES_AUTO, "prefix");
+        child.setNamespace(ResourceLibrary.URI_RES_AUTO, "prefix");
 
         Assert.assertEquals("prefix:child", child.getName(true));
 
-        child.setTagNamespace(null, null);
+        child.setNamespace(null, null);
 
         Assert.assertEquals("child", child.getName(true));
 
@@ -48,8 +48,8 @@ public class ResXmlDocumentTest {
         Assert.assertEquals(0, root.listElements("child-3").size());
         Assert.assertEquals(3, root.listXmlNodes().size());
 
-        Assert.assertNotNull("Element not found <child>", root.getElementByTagName("child"));
-        root.removeNode(root.getElementByTagName("child"));
+        Assert.assertNotNull("Element not found <child>", root.getElement("child"));
+        root.removeNode(root.getElement("child"));
         Assert.assertEquals(1, root.listElements("child").size());
         root.clearChildes();
         Assert.assertEquals("Child nodes cleared", 0, root.listXmlNodes().size());
@@ -121,7 +121,7 @@ public class ResXmlDocumentTest {
         XmlPullParser parser = XMLFactory.newPullParser(XML_STRING);
         document.parse(parser);
 
-        ResXmlElement root = document.getResXmlElement();
+        ResXmlElement root = document.getDocumentElement();
         Assert.assertNotNull(root);
         Assert.assertEquals(3, root.countElements());
         Assert.assertEquals(2, root.getNamespaceCount());

@@ -16,12 +16,22 @@
 package com.reandroid.dex.key;
 
 import com.reandroid.dex.common.DexUtils;
+import com.reandroid.dex.smali.SmaliParseException;
+import com.reandroid.dex.smali.SmaliReader;
+import com.reandroid.dex.smali.SmaliWriter;
 import com.reandroid.utils.CompareUtil;
+import com.reandroid.utils.StringsUtil;
+import com.reandroid.utils.collection.CombiningIterator;
+import com.reandroid.utils.collection.SingleIterator;
 
+import java.io.IOException;
+import java.util.Iterator;
 import java.util.Objects;
 
 public class StringKey implements Key{
+
     private final String text;
+    private boolean mSignature;
 
     public StringKey(String text) {
         this.text = text;
@@ -32,6 +42,41 @@ public class StringKey implements Key{
     }
 
     @Override
+    public boolean isPlatform() {
+        return false;
+    }
+
+    public boolean isSignature() {
+        return mSignature;
+    }
+    public void setSignature(boolean signature) {
+        this.mSignature = signature;
+    }
+
+    @Override
+    public TypeKey getDeclaring() {
+        if(!isSignature()){
+            return null;
+        }
+        return TypeKey.parseSignature(getString());
+    }
+    @Override
+    public Iterator<Key> mentionedKeys() {
+        return CombiningIterator.singleOne(
+                getDeclaring(),
+                SingleIterator.of(this));
+    }
+    @Override
+    public Key replaceKey(Key search, Key replace) {
+        if(search.equals(this)){
+            return replace;
+        }
+        return this;
+    }
+    public void append(SmaliWriter writer) throws IOException{
+        writer.append(DexUtils.quoteString(getString()));
+    }
+    @Override
     public int compareTo(Object obj) {
         if(obj == null){
             return -1;
@@ -41,7 +86,7 @@ public class StringKey implements Key{
     }
     @Override
     public boolean equals(Object obj) {
-        if (this == obj) {
+        if (this == obj || obj == ANY) {
             return true;
         }
         if (!(obj instanceof StringKey)) {
@@ -58,4 +103,37 @@ public class StringKey implements Key{
     public String toString() {
         return DexUtils.quoteString(getString());
     }
+
+    public static StringKey create(String text){
+        if(text == null){
+            return null;
+        }
+        if(text.length() == 0){
+            return EMPTY;
+        }
+        return new StringKey(text);
+    }
+    public static StringKey read(SmaliReader reader) throws IOException{
+        reader.skipSpaces();
+        SmaliParseException.expect(reader, '\"');
+        String str = reader.readEscapedString('"');
+        SmaliParseException.expect(reader, '\"');
+        return create(str);
+    }
+    public static final StringKey EMPTY = new StringKey(StringsUtil.EMPTY);
+
+    public static final StringKey ANY = new StringKey(StringsUtil.EMPTY){
+        @Override
+        public boolean equals(Object obj) {
+            return obj == this;
+        }
+        @Override
+        public int hashCode() {
+            return -1;
+        }
+        @Override
+        public String toString() {
+            return StringsUtil.EMPTY;
+        }
+    };
 }

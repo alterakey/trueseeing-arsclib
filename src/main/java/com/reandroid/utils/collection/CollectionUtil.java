@@ -16,11 +16,20 @@
 package com.reandroid.utils.collection;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 public class CollectionUtil {
 
+    public static void walk(Iterator<?> iterator){
+        if(iterator == null){
+            return;
+        }
+        while (iterator.hasNext()){
+            iterator.next();
+        }
+    }
     public static<T> List<T> toUniqueList(Iterator<? extends T> iterator) {
-        return new ArrayList<>(toHashSet(iterator));
+        return new ArrayCollection<>(toHashSet(iterator));
     }
     public static<T> HashSet<T> toHashSet(Iterator<? extends T> iterator) {
         HashSet<T> results = new HashSet<>();
@@ -43,6 +52,17 @@ public class CollectionUtil {
             result = iterator.next();
         }
         return result;
+    }
+    public static boolean contains(Iterator<?> iterator, Object obj){
+        if(iterator == null){
+            return false;
+        }
+        while (iterator.hasNext()){
+            if(obj.equals(iterator.next())){
+                return true;
+            }
+        }
+        return false;
     }
     public static<T> T getFirst(Iterator<T> iterator){
         if(iterator == null || !iterator.hasNext()){
@@ -111,12 +131,24 @@ public class CollectionUtil {
         }
         return !iterator.hasNext();
     }
+    public static<T> Collection<T> collect(Iterator<? extends T> iterator){
+        boolean hasNext = iterator.hasNext();
+        if(!hasNext){
+            return ArrayCollection.empty();
+        }
+        ArrayCollection<T> results = new ArrayCollection<>();
+        results.addAll(iterator);
+        if(results.size() > 1000){
+            results.trimToSize();
+        }
+        return results;
+    }
     public static<T> List<T> toList(Iterator<? extends T> iterator){
         boolean hasNext = iterator.hasNext();
         if(!hasNext){
             return EmptyList.of();
         }
-        ArrayList<T> results = new ArrayList<>(2);
+        ArrayCollection<T> results = new ArrayCollection<>(2);
         while (hasNext){
             results.add(iterator.next());
             hasNext = iterator.hasNext();
@@ -131,15 +163,12 @@ public class CollectionUtil {
         if(!hasNext){
             return EmptyIterator.of();
         }
-        ArrayList<T> results = new ArrayList<>(2);
-        while (hasNext){
-            results.add(iterator.next());
-            hasNext = iterator.hasNext();
-        }
-        if(results.size() > 1000){
-            results.trimToSize();
-        }
+        List<T> results = toList(iterator);
         return results.iterator();
+    }
+    @SuppressWarnings("unchecked")
+    public static<T> Predicate<T> getAcceptAll(){
+        return (Predicate<T>) ACCEPT_ALL;
     }
     @SuppressWarnings("unchecked")
     public static<T extends Comparable<T>> Comparator<T> getComparator(){
@@ -152,4 +181,6 @@ public class CollectionUtil {
             return c1.compareTo(c2);
         }
     };
+
+    private static final Predicate<?> ACCEPT_ALL = (Predicate<Object>) o -> true;
 }

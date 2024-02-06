@@ -15,7 +15,9 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliValue;
+import com.reandroid.dex.smali.model.SmaliValueDouble;
 import com.reandroid.utils.HexUtil;
 
 import java.io.IOException;
@@ -27,7 +29,9 @@ public class DoubleValue extends PrimitiveValue {
     }
 
     public double get(){
-        return Double.longBitsToDouble(getNumberValue());
+        int shift = (7 - getValueSize()) * 8;
+        long value = getNumberValue();
+        return Double.longBitsToDouble(value << shift);
     }
     public void set(double value){
         setNumberValue(Double.doubleToLongBits(value));
@@ -38,13 +42,19 @@ public class DoubleValue extends PrimitiveValue {
     }
     @Override
     public String getHex() {
-        return HexUtil.toHex(getNumberValue(), getValueSize()) + "L";
+        int shift = (7 - getValueSize()) * 8;
+        return HexUtil.toHex(getNumberValue() << shift, 8) + "L";
+    }
+
+    @Override
+    public void fromSmali(SmaliValue smaliValue) {
+        SmaliValueDouble smaliValueDouble = (SmaliValueDouble) smaliValue;
+        set(smaliValueDouble.getValue());
     }
 
     @Override
     public void append(SmaliWriter writer) throws IOException {
-        super.append(writer);
-        writer.appendComment(Double.toString(get()));
+        writer.append(get());
     }
     @Override
     public String toString() {

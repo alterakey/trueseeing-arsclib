@@ -16,18 +16,14 @@
 package com.reandroid.dex.model;
 
 import com.reandroid.arsc.chunk.PackageBlock;
-import com.reandroid.arsc.chunk.TableBlock;
-import com.reandroid.arsc.item.IntegerReference;
-import com.reandroid.arsc.item.IntegerVisitor;
 import com.reandroid.arsc.model.ResourceEntry;
 import com.reandroid.dex.common.AccessFlag;
 import com.reandroid.dex.common.AnnotationVisibility;
 import com.reandroid.dex.common.DexUtils;
-import com.reandroid.dex.index.ClassId;
+import com.reandroid.dex.id.ClassId;
 import com.reandroid.dex.ins.Ins35c;
 import com.reandroid.dex.ins.Opcode;
-import com.reandroid.dex.item.*;
-import com.reandroid.dex.key.AnnotationKey;
+import com.reandroid.dex.data.*;
 import com.reandroid.dex.key.MethodKey;
 import com.reandroid.dex.key.TypeKey;
 import com.reandroid.dex.value.ArrayValue;
@@ -35,6 +31,7 @@ import com.reandroid.dex.value.DexValueBlock;
 import com.reandroid.dex.value.DexValueType;
 import com.reandroid.dex.value.TypeValue;
 import com.reandroid.utils.CompareUtil;
+import com.reandroid.utils.collection.ArrayCollection;
 import com.reandroid.utils.collection.ComputeIterator;
 import com.reandroid.utils.collection.FilterIterator;
 import com.reandroid.utils.io.IOUtil;
@@ -43,57 +40,52 @@ import org.xmlpull.v1.XmlSerializer;
 import java.io.IOException;
 import java.util.*;
 
-public class RClassParent extends DexClass implements IntegerVisitor {
+public class RClassParent extends DexClass {
 
     private final Map<String, RClass> mMembers;
-    private final Map<Integer, RField> mFieldsMap;
+    private final Set<PackageBlock> mPackageBlocks;
 
     public RClassParent(DexFile dexFile, ClassId classId) {
         super(dexFile, classId);
         this.mMembers = new HashMap<>();
-        this.mFieldsMap = new HashMap<>();
+        this.mPackageBlocks = new HashSet<>();
     }
 
-    @Override
-    public void visit(Object sender, IntegerReference reference) {
-        DexFile.replaceRFields(getDexFile(), mFieldsMap, reference);
+    public RField getRField(int resourceId){
+        return load(getEntry(resourceId));
     }
-    public void replaceConstIds(){
-        updateFields();
-        getDexFile().visitIntegers(this);
+    public boolean hasRField(int resourceId){
+        return getEntry(resourceId) != null;
     }
-    private void updateFields(){
-        Map<Integer, RField> map = this.mFieldsMap;
-        map.clear();
-        for(RClass rClass : mMembers.values()){
-            Iterator<RField> iterator = rClass.getStaticFields();
-            while (iterator.hasNext()){
-                RField rField = iterator.next();
-                map.put(rField.getResourceId(), rField);
+    private ResourceEntry getEntry(int resourceId){
+        for(PackageBlock packageBlock : mPackageBlocks){
+            ResourceEntry entry = packageBlock.getResource(resourceId);
+            if(entry != null){
+                return entry;
             }
         }
+        return null;
     }
-
     public void load(PackageBlock packageBlock){
-        Iterator<ResourceEntry> iterator = packageBlock.getResources();
-        while (iterator.hasNext()){
-            load(iterator.next());
-        }
+        this.mPackageBlocks.add(packageBlock);
     }
-    private void load(ResourceEntry entry){
+    private RField load(ResourceEntry entry){
+        if(entry == null || entry.isEmpty()){
+            return null;
+        }
         RClass rClass = getOrCreateMember(entry.getType());
-        rClass.load(entry);
+        return rClass.load(entry);
     }
     public RClass getOrCreateMember(String simpleName){
-        String type = toMemberName(simpleName);
-        RClass rClass = mMembers.get(type);
+        TypeKey typeKey = getKey().createInnerClass(simpleName);
+        RClass rClass = mMembers.get(typeKey.getTypeName());
         if(rClass != null){
             return rClass;
         }
         addMemberAnnotation(simpleName);
-        ClassId classId = getDexFile().getOrCreateClassId(new TypeKey(type));
+        ClassId classId = getDexFile().getOrCreateClassId(typeKey);
         rClass = new RClass(getDexFile(), classId);
-        mMembers.put(type, rClass);
+        mMembers.put(typeKey.getTypeName(), rClass);
         rClass.initialize();
         return rClass;
     }
@@ -103,21 +95,15 @@ public class RClassParent extends DexClass implements IntegerVisitor {
         if(iterator.hasNext()){
             return;
         }
-        String type = toMemberName(simpleName);
         TypeValue typeValue = arrayValue.createNext(DexValueType.TYPE);
-        typeValue.set(new TypeKey(type));
+        typeValue.setItem(getKey().createInnerClass(simpleName));
     }
     public Iterator<String> getMemberSimpleNames(){
-        return ComputeIterator.of(getMemberNames(), DexUtils::getInnerSimpleName);
-    }
-    private String toMemberName(String simpleName){
-        String type = getClassName();
-        type = type.substring(0, type.length() - 1);
-        return type + "$" + simpleName + ";";
+        return ComputeIterator.of(getMemberNames(), DexUtils::getSimpleInnerName);
     }
     public Iterator<String> getMemberNames(){
         ArrayValue arrayValue = getOrCreateMembersArray();
-        return ComputeIterator.of(arrayValue.iterator(TypeValue.class), TypeValue::getType);
+        return ComputeIterator.of(arrayValue.iterator(TypeValue.class), typeValue -> getKey().getTypeName());
     }
     private ArrayValue getOrCreateMembersArray(){
         AnnotationItem item = getOrCreateMemberAnnotation();
@@ -132,14 +118,13 @@ public class RClassParent extends DexClass implements IntegerVisitor {
     }
     private AnnotationItem getOrCreateMemberAnnotation(){
         AnnotationSet annotationSet = getOrCreateClassAnnotations();
-        AnnotationKey key = new AnnotationKey(DexUtils.DALVIK_MEMBER, "value");
-        AnnotationItem item = annotationSet.get(key);
-        if(item != null){
+        String name = "value";
+        AnnotationItem item = annotationSet.getOrCreate(DexUtils.DALVIK_MEMBER, name);
+        AnnotationElement element = item.getElement(name);
+        if(element.getValueType() == DexValueType.ARRAY){
             return item;
         }
-        item = annotationSet.getOrCreate(key);
         item.setVisibility(AnnotationVisibility.SYSTEM);
-        AnnotationElement element = item.getElement(key.getName());
         ArrayValue array = DexValueType.ARRAY.newInstance();
         element.setValue(array);
         return item;
@@ -149,25 +134,26 @@ public class RClassParent extends DexClass implements IntegerVisitor {
         if(annotationSet != null){
             return annotationSet;
         }
-        annotationSet = getClassId().getOrCreateClassAnnotations();
+        annotationSet = getId().getOrCreateClassAnnotations();
         return annotationSet;
     }
     private AnnotationSet getClassAnnotations() {
-        return getClassId().getClassAnnotations();
+        return getId().getClassAnnotations();
     }
     public void initialize(){
-        ClassId classId = getClassId();
+        ClassId classId = getId();
         classId.addAccessFlag(AccessFlag.PUBLIC);
         ClassData classData = classId.getOrCreateClassData();
         MethodKey methodKey = new MethodKey(classId.getName(), "<init>", null, "V");
-        if(classData.getDirectMethods().get(methodKey) != null){
+        if(classData.getMethod(methodKey) != null){
             return;
         }
-        MethodDef methodDef = classData.getDirectMethods().getOrCreate(methodKey);
-        methodDef.addAccessFlags(AccessFlag.PUBLIC, AccessFlag.CONSTRUCTOR);
+        MethodDef methodDef = classData.getOrCreateDirect(methodKey);
+        methodDef.addAccessFlag(AccessFlag.PUBLIC);
+        methodDef.addAccessFlag(AccessFlag.CONSTRUCTOR);
         InstructionList insList = methodDef.getOrCreateInstructionList();
         Ins35c ins = insList.createNext(Opcode.INVOKE_DIRECT);
-        ins.setSectionItem(MethodKey.parse("Ljava/lang/Object;-><init>()V"));
+        ins.setSectionIdKey(MethodKey.parse("Ljava/lang/Object;-><init>()V"));
         ins.setRegistersCount(1);
         ins.setRegister(0, 0);
         insList.createNext(Opcode.RETURN_VOID);
@@ -189,7 +175,8 @@ public class RClassParent extends DexClass implements IntegerVisitor {
         serializer.text("\n");
         serializer.startTag(null, PackageBlock.TAG_resources);
 
-        List<RField> fieldList = new ArrayList<>(rFields);
+        List<RField> fieldList = new ArrayCollection<>();
+        fieldList.addAll(rFields);
         fieldList.sort(CompareUtil.getComparableComparator());
         for(RField rField : fieldList) {
             rField.serializePublicXml(serializer);

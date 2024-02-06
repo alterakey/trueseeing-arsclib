@@ -15,26 +15,27 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.index.IdSectionEntry;
-import com.reandroid.dex.item.AnnotationElement;
+import com.reandroid.dex.base.UsageMarker;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.data.AnnotationElement;
 import com.reandroid.dex.key.Key;
-import com.reandroid.dex.sections.Section;
 import com.reandroid.dex.sections.SectionType;
+import com.reandroid.utils.collection.SingleIterator;
 
-public abstract class SectionIdValue<T extends IdSectionEntry> extends SectionValue<T> {
+import java.util.Iterator;
+
+public abstract class SectionIdValue<T extends IdItem> extends SectionValue<T> {
 
     public SectionIdValue(SectionType<T> sectionType, DexValueType<?> type) {
         super(sectionType, type);
     }
+
     public void setKey(Key key) {
-        Section<T> section = getSection();
-        if(section != null){
-            set(section.getOrCreate(key));
-        }
+        setItem(key);
     }
     @Override
     public Key getKey(){
-        T item = get();
+        T item = getItem();
         if(item != null){
             return item.getKey();
         }
@@ -42,48 +43,48 @@ public abstract class SectionIdValue<T extends IdSectionEntry> extends SectionVa
     }
     @Override
     int getSectionValue(T data){
-        if(data != null){
-            return data.getIndex();
+        if(data == null){
+            throw new NullPointerException("Section data can not be null: " +
+                    getSectionType().getName());
         }
-        return 0;
+        return data.getIndex();
     }
     @Override
-    T getSectionData(Section<T> section, int value){
-        return section.get(value);
+    T getReplacement(T data) {
+        if(data != null){
+            data = data.getReplace();
+        }
+        if(data == null){
+            throw new NullPointerException("Section data can not be null: " +
+                    getSectionType().getName());
+        }
+        return data;
     }
 
     @Override
-    void onDataRefreshed(T data){
-        super.onDataRefreshed(data);
-        addUsageType(data);
-    }
-    @Override
-    void onDataUpdated(T data){
-        super.onDataUpdated(data);
-        addUsageType(data);
-    }
-
-    private void addUsageType(T data) {
+    void updateUsageType(T data){
         if(data != null){
             int usage;
             if(getParent(AnnotationElement.class) != null){
-                usage = IdSectionEntry.USAGE_ANNOTATION;
+                usage = UsageMarker.USAGE_ANNOTATION;
             }else {
-                usage = IdSectionEntry.USAGE_ENCODED_VALUE;
+                usage = UsageMarker.USAGE_ENCODED_VALUE;
             }
             data.addUsageType(usage);
         }
     }
     @Override
-    public String getAsString() {
-        T data = get();
-        if(data != null){
-            Key key = data.getKey();
-            if(key != null){
-                return key.toString();
-            }
-            return null;
+    public void replaceKeys(Key search, Key replace) {
+        Key key = getKey();
+        Key key2 = key.replaceKey(search, replace);
+        if(key != key2){
+            setItem(key2);
         }
-        return null;
     }
+
+    @Override
+    public Iterator<IdItem> usedIds(){
+        return SingleIterator.of(getItem());
+    }
+
 }

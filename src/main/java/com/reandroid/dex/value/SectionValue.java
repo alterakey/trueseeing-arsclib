@@ -15,21 +15,25 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.arsc.base.Block;
 import com.reandroid.arsc.io.BlockReader;
+import com.reandroid.dex.common.SectionItem;
 import com.reandroid.dex.key.Key;
 import com.reandroid.dex.key.KeyItem;
+import com.reandroid.dex.reference.DexReference;
 import com.reandroid.dex.sections.Section;
 import com.reandroid.dex.sections.SectionList;
 import com.reandroid.dex.sections.SectionType;
-import com.reandroid.dex.writer.SmaliFormat;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliFormat;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliValue;
+import com.reandroid.dex.smali.model.SmaliValueKey;
 import com.reandroid.utils.HexUtil;
 
 import java.io.IOException;
+import java.util.Objects;
 
-public abstract class SectionValue<T extends Block> extends DexValueBlock<NumberValue>
-        implements SmaliFormat, KeyItem {
+public abstract class SectionValue<T extends SectionItem> extends DexValueBlock<NumberValue>
+        implements SmaliFormat, KeyItem, DexReference<T> {
 
     private final SectionType<T> sectionType;
     private T mData;
@@ -40,34 +44,71 @@ public abstract class SectionValue<T extends Block> extends DexValueBlock<Number
     }
 
     @Override
-    public Key getKey(){
-        return null;
-    }
-    public T get(){
+    public abstract Key getKey();
+    @Override
+    public T getItem(){
         return mData;
     }
-    public void set(T data){
+    @Override
+    public void setItem(T data){
         if(data == mData){
             return;
         }
         this.mData = data;
-        getValueContainer().setNumberValue(getSectionValue(data));
-        onDataUpdated(data);
+        set(getSectionValue(data));
+        updateUsageType(data);
     }
-    public void set(Key key){
-        T item = getSection().getPool().getOrCreate(key);
-        set(item);
+    @Override
+    public void setItem(Key key){
+        Section<T> section = getOrCreateSection();
+        T item = section.getOrCreate(key);
+        setItem(item);
+    }
+    @Override
+    public SectionType<T> getSectionType() {
+        return sectionType;
+    }
+    @Override
+    public int get(){
+        return getValueContainer().getIntegerValue();
+    }
+    @Override
+    public void set(int value){
+        NumberValue numberValue = getValueContainer();
+        numberValue.setNumberValue(value);
+        int size = numberValue.getSize();
+        setValueSize(size - 1);
     }
     @Override
     public abstract DexValueType<?> getValueType();
     abstract int getSectionValue(T data);
-    abstract T getSectionData(Section<T> section, int value);
+    abstract T getReplacement(T data);
+    abstract void updateUsageType(T data);
     Section<T> getSection(){
         SectionList sectionList = getParentInstance(SectionList.class);
         if(sectionList != null) {
-            return sectionList.get(sectionType);
+            return sectionList.getSection(getSectionType());
         }
         return null;
+    }
+    private Section<T> getOrCreateSection(){
+        SectionList sectionList = getParentInstance(SectionList.class);
+        if(sectionList != null) {
+            return sectionList.getOrCreateSection(getSectionType());
+        }
+        throw new NullPointerException("Null parent SectionList");
+    }
+    @SuppressWarnings("unchecked")
+    @Override
+    public void merge(DexValueBlock<?> valueBlock){
+        super.merge(valueBlock);
+        SectionValue<T> value = (SectionValue<T>) valueBlock;
+        setItem(value.getKey());
+    }
+    @Override
+    public void fromSmali(SmaliValue smaliValue) {
+        SmaliValueKey smaliValueKey = (SmaliValueKey) smaliValue;
+        setItem(smaliValueKey.getValue());
     }
 
     @Override
@@ -76,69 +117,68 @@ public abstract class SectionValue<T extends Block> extends DexValueBlock<Number
         NumberValue numberValue = getValueContainer();
         numberValue.setSize(getValueSize() + 1);
         numberValue.readBytes(reader);
-        updateData();
+        pullItem();
     }
     @Override
     protected void onPreRefresh() {
-        refreshData();
+        refreshItem();
     }
-    private void refreshData() {
-        T data = this.mData;
-        NumberValue numberValue = getValueContainer();
-        numberValue.setNumberValue(getSectionValue(data));
-        int size = numberValue.getSize();
-        setValueSize(size - 1);
-        onDataRefreshed(data);
+    private void refreshItem() {
+        T data = getReplacement(this.mData);
+        this.mData = data;
+        set(getSectionValue(data));
+        updateUsageType(data);
     }
-    private void updateData(){
-        T data = this.mData;
-        int value = getValueContainer().getIntegerValue();
-        if(data == null || getSectionValue(data) != value){
-            Section<T> section = getSection();
-            if(section != null){
-                mData = getSectionData(section, value);
-                onDataUpdated(mData);
-            }
+    public void pullItem(){
+        Section<T> section = getSection();
+        if(section != null){
+            mData = section.getSectionItem(get());
+            updateUsageType(mData);
         }
-    }
-    void onDataRefreshed(T data){
-    }
-    void onDataUpdated(T data){
     }
 
     @Override
     public String getAsString() {
-        T data = get();
-        if(data instanceof KeyItem){
-            return ((KeyItem) data).toString();
+        Key key = getKey();
+        if(key != null){
+            return key.toString();
         }
         return null;
     }
     @Override
     public void append(SmaliWriter writer) throws IOException {
-        T data = get();
+        T data = getItem();
         if(data == null){
             writer.append("value error: ");
-            writer.append(sectionType.toString());
+            writer.append(getSectionType().getName());
             writer.append(' ');
-            writer.append(HexUtil.toHex(getValueContainer().getNumberValue(), getValueSize()));
+            writer.append(HexUtil.toHex(get(), getValueSize()));
         }else {
             ((SmaliFormat) data).append(writer);
         }
     }
 
     @Override
-    public String toString() {
-        StringBuilder builder = new StringBuilder();
-        T data = get();
-        if(data == null){
-            builder.append("value error: ");
-            builder.append(sectionType);
-            builder.append(' ');
-            builder.append(HexUtil.toHex(getValueContainer().getNumberValue(), getValueSize()));
-        }else {
-            builder.append(data);
+    public int hashCode() {
+        Key key = getKey();
+        if(key != null){
+            return key.hashCode();
         }
-        return builder.toString();
+        return 0;
+    }
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        SectionValue<?> value = (SectionValue<?>)obj;
+        return Objects.equals(getKey(), value.getKey());
+    }
+    @Override
+    public String toString() {
+        return SmaliWriter.toStringSafe(this);
     }
 }

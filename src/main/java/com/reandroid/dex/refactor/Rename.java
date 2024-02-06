@@ -15,20 +15,11 @@
  */
 package com.reandroid.dex.refactor;
 
-import com.reandroid.dex.item.StringData;
-import com.reandroid.dex.sections.DexFileBlock;
-import com.reandroid.dex.sections.Section;
-import com.reandroid.dex.sections.SectionList;
-import com.reandroid.dex.sections.SectionType;
-import com.reandroid.utils.collection.CollectionUtil;
-import com.reandroid.utils.collection.ComputeIterator;
-import com.reandroid.utils.collection.FilterIterator;
-import com.reandroid.utils.collection.MergingIterator;
+import com.reandroid.utils.collection.*;
 
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.Writer;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -36,57 +27,12 @@ public class Rename implements Iterable<RenameInfo<?>>{
     private final List<RenameInfo<?>> renameInfoList;
 
     public Rename(){
-        this.renameInfoList = new ArrayList<>();
+        this.renameInfoList = new ArrayCollection<>();
     }
 
-    public void apply(DexFileBlock dexFileBlock){
-        dexFileBlock.linkTypeSignature();
-        SectionList sectionList = dexFileBlock.getSectionList();
-        for(RenameInfo<?> renameInfo : this){
-            renameInfo.apply(sectionList);
-        }
-        lookStrings(sectionList.get(SectionType.STRING_DATA));
-    }
-    private void lookStrings(Section<StringData> sectionString){
-        List<RenameInfo<?>> renameInfoList = CollectionUtil.toList(FilterIterator.of(
-                getAll(), RenameInfo::looksStrings));
-        if(renameInfoList.isEmpty()){
-            return;
-        }
-        Iterator<StringData> iterator = sectionString.iterator();
-        while (iterator.hasNext()){
-            lookString(renameInfoList, iterator.next());
-        }
-    }
-    private void lookString(List<RenameInfo<?>> renameInfoList, StringData stringData){
-        for(RenameInfo<?> renameInfo : renameInfoList){
-            if(renameInfo.lookString(stringData)){
-                return;
-            }
-        }
-    }
     public Iterator<RenameInfo<?>> getAll(){
         return new MergingIterator<>(ComputeIterator.of(iterator(),
                 RenameInfo::iterator));
-    }
-
-    public void addClass(String search, String replace){
-        add(new RenameInfoClass(search, replace));
-    }
-    public void addMethod(String typeName, String parameters, String search, String replace){
-        add(new RenameInfoMethodName(typeName, parameters, search, replace));
-    }
-    public void addAnnotation(String typeName, String search, String replace){
-        add(new RenameInfoAnnotationName(typeName, search, replace));
-    }
-    public void addField(String typeName, String search, String replace){
-        add(new RenameInfoFieldName(typeName, search, replace));
-    }
-    public void addPackage(String search, String replace){
-        add(new RenameInfoPackage(search, replace));
-    }
-    public void addString(String search, String replace){
-        add(new RenameInfoString(search, replace));
     }
 
     public void add(RenameInfo<?> renameInfo){

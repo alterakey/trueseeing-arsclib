@@ -20,7 +20,7 @@ import com.reandroid.arsc.item.TypeString;
 import com.reandroid.arsc.model.ResourceEntry;
 import com.reandroid.arsc.value.Entry;
 import com.reandroid.dex.common.AccessFlag;
-import com.reandroid.dex.item.FieldDef;
+import com.reandroid.dex.data.FieldDef;
 import com.reandroid.dex.value.DexValueBlock;
 import com.reandroid.dex.value.DexValueType;
 import com.reandroid.dex.value.IntValue;
@@ -41,9 +41,6 @@ public class RField extends DexField implements Comparable<RField> {
         super(rClass, fieldDef);
     }
 
-    public void addAccessFlag(AccessFlag accessFlag){
-        getFieldDef().addAccessFlag(accessFlag);
-    }
     public void serializePublicXml(XmlSerializer serializer) throws IOException {
         ResourceEntry resourceEntry = toResourceEntry();
         resourceEntry.serializePublicXml(serializer);

@@ -15,63 +15,136 @@
  */
 package com.reandroid.dex.key;
 
-import com.reandroid.dex.index.FieldId;
+import com.reandroid.dex.id.FieldId;
+import com.reandroid.dex.smali.SmaliParseException;
+import com.reandroid.dex.smali.SmaliReader;
+import com.reandroid.dex.smali.SmaliWriter;
 import com.reandroid.utils.CompareUtil;
 import com.reandroid.utils.StringsUtil;
+import com.reandroid.utils.collection.CombiningIterator;
+import com.reandroid.utils.collection.SingleIterator;
 
-import java.util.Objects;
+import java.io.IOException;
+import java.util.Iterator;
+
 
 public class FieldKey implements Key {
-    private final String defining;
+
+    private final String declaring;
     private final String name;
     private final String type;
 
-    public FieldKey(String defining, String name, String type) {
-        this.defining = defining;
+    public FieldKey(String declaring, String name, String type) {
+        this.declaring = declaring;
         this.name = name;
         this.type = type;
     }
-    public TypeKey getDefiningKey() {
-        return new TypeKey(getDefining());
+
+    public FieldKey changeDefining(TypeKey typeKey){
+        return changeDefining(typeKey.getTypeName());
     }
+    public FieldKey changeDefining(String defining){
+        if(defining.equals(getDeclaringName())){
+            return this;
+        }
+        return new FieldKey(defining, getName(), getTypeName());
+    }
+    public FieldKey changeName(String name){
+        if(name.equals(getName())){
+            return this;
+        }
+        return new FieldKey(getDeclaringName(), name, getTypeName());
+    }
+    public FieldKey changeType(TypeKey typeKey){
+        return changeType(typeKey.getTypeName());
+    }
+    public FieldKey changeType(String type){
+        if(type.equals(getTypeName())){
+            return this;
+        }
+        return new FieldKey(getDeclaringName(), getName(), type);
+    }
+
+    @Override
+    public TypeKey getDeclaring() {
+        return new TypeKey(getDeclaringName());
+    }
+    @Override
+    public Iterator<Key> mentionedKeys() {
+        return CombiningIterator.singleThree(
+                FieldKey.this,
+                SingleIterator.of(getDeclaring()),
+                SingleIterator.of(getNameKey()),
+                SingleIterator.of(getType()));
+    }
+    @Override
+    public Key replaceKey(Key search, Key replace) {
+        FieldKey result = this;
+        if(search.equals(result)){
+            return replace;
+        }
+        if(search.equals(result.getDeclaring())){
+            result = result.changeDefining((TypeKey) replace);
+        }
+        if(search.equals(result.getType())){
+            result = result.changeType((TypeKey) replace);
+        }
+        return result;
+    }
+
     public StringKey getNameKey() {
         return new StringKey(getName());
     }
-    public TypeKey getTypeKey() {
-        return new TypeKey(getType());
+    public TypeKey getType() {
+        return new TypeKey(getTypeName());
     }
 
-    public String getDefining() {
-        return defining;
+    public String getDeclaringName() {
+        return declaring;
     }
     public String getName() {
         return name;
     }
-    public String getType() {
+    public String getTypeName() {
         return type;
     }
 
     @Override
+    public void append(SmaliWriter writer) throws IOException {
+        writer.appendOptional(getDeclaring());
+        writer.append("->");
+        writer.append(getName());
+        writer.append(':');
+        writer.appendOptional(getType());
+    }
+
+    @Override
     public int compareTo(Object obj) {
+        return compareTo(obj, true);
+    }
+    public int compareTo(Object obj, boolean compareDefining) {
         if(obj == null){
             return -1;
         }
         FieldKey key = (FieldKey) obj;
-        int i = CompareUtil.compare(getDefining(), key.getDefining());
-        if(i != 0) {
-            return i;
+        int i;
+        if(compareDefining){
+            i = CompareUtil.compare(getDeclaringName(), key.getDeclaringName());
+            if(i != 0) {
+                return i;
+            }
         }
         i = CompareUtil.compare(getName(), key.getName());
         if(i != 0) {
             return i;
         }
-        return CompareUtil.compare(getType(), key.getType());
+        return CompareUtil.compare(getTypeName(), key.getTypeName());
     }
 
     @Override
     public int hashCode() {
         int hash = 1;
-        String defining = getDefining();
+        String defining = getDeclaringName();
         if(defining != null){
             hash += defining.hashCode();
         }
@@ -80,6 +153,9 @@ public class FieldKey implements Key {
 
     @Override
     public boolean equals(Object obj) {
+        return equals(obj, true, true);
+    }
+    public boolean equals(Object obj, boolean checkDefining, boolean checkType) {
         if (this == obj) {
             return true;
         }
@@ -87,20 +163,30 @@ public class FieldKey implements Key {
             return false;
         }
         FieldKey fieldKey = (FieldKey) obj;
-        return Objects.equals(getDefining(), fieldKey.getDefining()) &&
-                getName().equals(fieldKey.getName());
+        if(!KeyUtil.matches(getName(), fieldKey.getName())){
+            return false;
+        }
+        if(checkDefining){
+            if(!KeyUtil.matches(getDeclaringName(), fieldKey.getDeclaringName())){
+                return false;
+            }
+        }
+        if(checkType){
+            return KeyUtil.matches(getTypeName(), fieldKey.getTypeName());
+        }
+        return true;
     }
 
     @Override
     public String toString() {
         StringBuilder builder = new StringBuilder();
-        builder.append(getDefining());
+        builder.append(getDeclaringName());
         builder.append("->");
         builder.append(getName());
-        String type = getType();
+        String type = getTypeName();
         if(type != null){
             builder.append(':');
-            builder.append(getType());
+            builder.append(getTypeName());
         }
         return builder.toString();
     }
@@ -132,7 +218,7 @@ public class FieldKey implements Key {
         return new FieldKey(defining, name, type);
     }
     public static FieldKey create(FieldId fieldId){
-        String defining = fieldId.getClassName();
+        TypeKey defining = fieldId.getDefining();
         if(defining == null){
             return null;
         }
@@ -140,7 +226,36 @@ public class FieldKey implements Key {
         if(name == null) {
             return null;
         }
-        return new FieldKey(defining, name, fieldId.getFieldTypeName());
+        TypeKey fieldType = fieldId.getFieldType();
+        if(fieldType == null){
+            return null;
+        }
+        return new FieldKey(defining.getTypeName(), name, fieldType.getTypeName());
+    }
+
+    public static FieldKey read(SmaliReader reader) throws IOException {
+        TypeKey declaring = TypeKey.read(reader);
+        reader.skipWhitespacesOrComment();
+        SmaliParseException.expect(reader, '-');
+        SmaliParseException.expect(reader, '>');
+        reader.skipWhitespacesOrComment();
+        int i;
+        int i1 = reader.indexOfBeforeLineEnd(':');
+        int i2 = reader.indexOfWhiteSpaceOrComment();
+        if(i1 < 0 && i2 < 0){
+            throw new SmaliParseException("Expecting ':'", reader);
+        }
+        if(i1 < 0 || i2 >= 0 && i2 < i1){
+            i = i2;
+        }else {
+            i = i1;
+        }
+        char stop = reader.getASCII(i);
+        String name = reader.readEscapedString(stop);
+        reader.skipWhitespacesOrComment();
+        SmaliParseException.expect(reader, ':');
+        TypeKey type = TypeKey.read(reader);
+        return new FieldKey(declaring.getTypeName(), name, type.getTypeName());
     }
 
 }

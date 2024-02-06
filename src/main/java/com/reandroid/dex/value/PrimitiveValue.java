@@ -16,7 +16,7 @@
 package com.reandroid.dex.value;
 
 import com.reandroid.arsc.io.BlockReader;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
 
 import java.io.IOException;
 
@@ -30,7 +30,7 @@ public abstract class PrimitiveValue extends DexValueBlock<NumberValue> {
         return getValueContainer().getNumberValue();
     }
     public void setNumberValue(int value){
-        setNumberValue((long)value);
+        setNumberValue(0x00000000ffffffffL & value);
     }
     public void setNumberValue(long value){
         NumberValue container = getValueContainer();
@@ -49,6 +49,13 @@ public abstract class PrimitiveValue extends DexValueBlock<NumberValue> {
         NumberValue container = getValueContainer();
         container.setSize(getValueSize() + 1);
         container.readBytes(reader);
+    }
+
+    @Override
+    public void merge(DexValueBlock<?> valueBlock){
+        super.merge(valueBlock);
+        PrimitiveValue coming = (PrimitiveValue) valueBlock;
+        getValueContainer().merge(coming.getValueContainer());
     }
     @Override
     public void append(SmaliWriter writer) throws IOException {

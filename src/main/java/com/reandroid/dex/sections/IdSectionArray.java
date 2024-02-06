@@ -17,25 +17,18 @@ package com.reandroid.dex.sections;
 
 import com.reandroid.arsc.base.Creator;
 import com.reandroid.arsc.io.BlockReader;
-import com.reandroid.dex.base.DexItemArray;
 import com.reandroid.dex.base.IntegerPair;
-import com.reandroid.dex.index.IdSectionEntry;
+import com.reandroid.dex.id.IdItem;
 
 import java.io.IOException;
 
-public class IdSectionArray<T extends IdSectionEntry> extends SectionArray<T> {
+public class IdSectionArray<T extends IdItem> extends SectionArray<T> {
 
     public IdSectionArray(IntegerPair countAndOffset, Creator<T> creator) {
         super(countAndOffset, creator);
     }
 
-    @Override
-    protected void readChildes(BlockReader reader) throws IOException {
-        T[] childes = getChildes();
-        int length = childes.length;
-        for(int i = 0; i < length; i++){
-            T item = childes[i];
-            item.onReadBytes(reader);
-        }
+    public void readChild(BlockReader reader, T item) throws IOException{
+        item.onReadBytes(reader);
     }
 }

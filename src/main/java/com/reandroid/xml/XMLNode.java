@@ -15,14 +15,17 @@
   */
 package com.reandroid.xml;
 
+import com.reandroid.utils.collection.EmptyIterator;
+import com.reandroid.xml.base.Node;
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
-import org.xmlpull.v1.XmlSerializer;
 
 import java.io.IOException;
 import java.io.StringWriter;
+import java.util.Iterator;
 
-public abstract class XMLNode {
+public abstract class XMLNode implements Node {
+
     private XMLNode mParent;
     private int mLineNumber;
     private int mColumnNumber;
@@ -32,11 +35,30 @@ public abstract class XMLNode {
     int getLength(){
         return 0;
     }
-    abstract XMLNode clone(XMLNode parent);
-    public XMLNode getParent(){
+    int getTextLength(){
+        return 0;
+    }
+    abstract XMLNode newCopy(XMLNode parent);
+    public XMLNode getParentNode(){
         return mParent;
     }
-    void setParent(XMLNode parent){
+    public XMLNode getRootParentNode(){
+        XMLNode parent = getParentNode();
+        if(parent != null){
+            return parent.getRootParentNode();
+        }
+        return this;
+    }
+    public Iterator<XMLNode> iterator(){
+        return EmptyIterator.of();
+    }
+    public void removeSelf(){
+        XMLNode parent = getParentNode();
+        if(parent instanceof XMLNodeTree){
+            ((XMLNodeTree) parent).remove(this);
+        }
+    }
+    void setParentNode(XMLNode parent){
         if(parent != this){
             this.mParent = parent;
         }
@@ -55,13 +77,9 @@ public abstract class XMLNode {
         this.mLineNumber = lineNumber;
     }
 
-    public abstract void serialize(XmlSerializer serializer) throws IOException;
     public void parse(XmlPullParser parser) throws XmlPullParserException, IOException {
     }
     abstract void write(Appendable writer, boolean xml, boolean escapeXmlText) throws IOException;
-    public String toText(){
-        return toText(true, false);
-    }
     public String toText(boolean xml, boolean escapeXmlText){
         StringWriter writer = new StringWriter();
         try {

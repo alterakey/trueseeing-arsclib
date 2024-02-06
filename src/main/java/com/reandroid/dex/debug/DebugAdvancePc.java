@@ -15,25 +15,33 @@
  */
 package com.reandroid.dex.debug;
 
+import com.reandroid.dex.base.DexException;
 import com.reandroid.dex.base.Ule128Item;
 
-public class DebugAdvancePc extends DebugSkip{
-    private final Ule128Item addressDiff;
-    public DebugAdvancePc() {
-        super(1, DebugElementType.ADVANCE_PC);
-        this.addressDiff = new Ule128Item();
-        addChild(1, addressDiff);
-    }
+public class DebugAdvancePc extends DebugAdvance{
 
-    public int getAddressDiff() {
-        return addressDiff.get();
-    }
-    public void setAddressDiff(int addressDiff){
-        this.addressDiff.set(addressDiff);
+    public DebugAdvancePc() {
+        super(DebugElementType.ADVANCE_PC, new Ule128Item());
     }
 
     @Override
-    public String toString() {
-        return "addressDiff=" + addressDiff;
+    public int getAddressDiff() {
+        return getAdvance();
+    }
+    public void setAddressDiff(int addressDiff){
+        setAdvance(addressDiff);
+    }
+
+    @Override
+    public void setAdvance(int advance) {
+        if(advance < 0){
+            throw new DexException("Can not set negative advance: " + advance);
+        }
+        super.setAdvance(advance);
+    }
+
+    @Override
+    public DebugElementType<DebugAdvancePc> getElementType() {
+        return DebugElementType.ADVANCE_PC;
     }
 }

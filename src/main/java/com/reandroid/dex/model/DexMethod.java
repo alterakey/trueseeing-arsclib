@@ -16,17 +16,22 @@
 package com.reandroid.dex.model;
 
 import com.reandroid.dex.common.AccessFlag;
-import com.reandroid.dex.index.MethodId;
-import com.reandroid.dex.index.TypeId;
+import com.reandroid.dex.data.*;
+import com.reandroid.dex.id.MethodId;
 import com.reandroid.dex.ins.Ins;
-import com.reandroid.dex.item.MethodDef;
-import com.reandroid.dex.writer.SmaliWriter;
-import com.reandroid.utils.collection.ComputeIterator;
+import com.reandroid.dex.ins.Opcode;
+import com.reandroid.dex.key.Key;
+import com.reandroid.dex.key.MethodKey;
+import com.reandroid.dex.key.TypeKey;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.utils.collection.*;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
-public class DexMethod extends DexDef {
+public class DexMethod extends DexDeclaration {
     private final DexClass dexClass;
     private final MethodDef methodDef;
 
@@ -34,77 +39,176 @@ public class DexMethod extends DexDef {
         this.dexClass = dexClass;
         this.methodDef = methodDef;
     }
-    public Iterator<DexMethod> getSuperMethods() {
-        String key = getKey();
-        return ComputeIterator.of(getDexClass().getSuperClasses(),
-                dexClass -> dexClass.getDefinedMethod(key));
+
+    public DexMethod getDeclared(){
+        DexClass dexClass = getDexClass().getSuperClass();
+        if(dexClass != null){
+            DexMethod dexMethod = dexClass.getMethod(getKey());
+            if(dexMethod != null){
+                return dexMethod.getDeclared();
+            }
+        }
+        dexClass = getDexClass();
+        Iterator<DexClass> iterator = dexClass.getInterfaceClasses();
+        while (iterator.hasNext()){
+            dexClass = iterator.next();
+            DexMethod dexMethod = dexClass.getMethod(getKey());
+            if(dexMethod != null){
+                return dexMethod.getDeclared();
+            }
+        }
+        return this;
     }
 
+    public Iterator<DexMethod> getSuperMethods() {
+        MethodKey key = getKey();
+        return ComputeIterator.of(getDexClass().getSuperTypes(),
+                dexClass -> dexClass.getDeclaredMethod(key));
+    }
+    public Iterator<DexMethod> getOverriding() {
+        return CombiningIterator.two(getExtending(), getImplementations());
+    }
+    public DexMethod getBridged(){
+        if(!isBridge()){
+            return null;
+        }
+        MethodKey bridgedKey = null;
+        Iterator<DexInstruction> iterator = getInstructions();
+        while (iterator.hasNext()){
+            DexInstruction instruction = iterator.next();
+            Key key = instruction.getKey();
+            if(!(key instanceof MethodKey)){
+                continue;
+            }
+            MethodKey methodKey = (MethodKey) key;
+            if(bridgedKey != null){
+                return null;
+            }
+            bridgedKey = methodKey;
+        }
+        if(bridgedKey == null){
+            return null;
+        }
+        if(!getDefining().equals(bridgedKey.getDeclaring())){
+            return null;
+        }
+        if(!getName().equals(bridgedKey.getName())){
+            return null;
+        }
+        DexClass dexClass = getDexClass();
+        dexClass.addAccessFlag(AccessFlag.SYNTHETIC);
+        return dexClass.getDeclaredMethod(bridgedKey);
+    }
+    public Iterator<DexMethod> getExtending() {
+        return new MergingIterator<>(ComputeIterator.of(getDexClass().getExtending(),
+                dexClass -> dexClass.getExtending(getKey())));
+    }
     public Iterator<DexMethod> getImplementations() {
-        return null;
+        return new MergingIterator<>(ComputeIterator.of(getDexClass().getImplementations(),
+                dexClass -> dexClass.getImplementations(getKey())));
     }
-    @Override
-    public String getAccessFlags() {
-        return AccessFlag.formatForMethod(getAccessFlagsValue());
+    public Iterator<MethodKey> getOverridingKeys() {
+        return new MergingIterator<>(ComputeIterator.of(getDexClass().getOverriding(),
+                new Function<DexClass, Iterator<MethodKey>>() {
+                    @Override
+                    public Iterator<MethodKey> apply(DexClass dexClass) {
+                        return dexClass.getOverridingKeys(DexMethod.this.getKey());
+                    }
+                }));
     }
-    @Override
-    int getAccessFlagsValue() {
-        return getMethodDef().getAccessFlagsValue();
-    }
+
     public String getName(){
-        return getMethodDef().getName();
+        return getDefinition().getName();
     }
     public void setName(String name){
-        getMethodDef().setName(name);
+        getDefinition().setName(name);
     }
-    public int getParametersCount() {
-        return getMethodId().getParametersCount();
+
+    public Iterator<AnnotationSet> getAnnotationSets(){
+        return getDefinition().getAnnotations();
     }
-    public String getParameter(int index) {
-        TypeId typeId = getMethodId().getParameter(index);
-        if(typeId != null){
-            return typeId.getName();
-        }
-        return null;
+    @Override
+    public Iterator<AnnotationItem> getAnnotations(){
+        return ExpandIterator.of(getAnnotationSets());
     }
-    public Iterator<String> getParameters() {
-        return ComputeIterator.of(getMethodId().getParameters(), TypeId::getName);
+    @Override
+    public Iterator<AnnotationItem> getAnnotations(TypeKey typeKey){
+        return FilterIterator.of(getAnnotations(),
+                item -> typeKey.equals(item.getTypeKey()));
     }
-    public String getReturnType() {
-        TypeId typeId = getMethodId().getReturnTypeId();
-        if(typeId != null) {
-            return typeId.getName();
-        }
-        return null;
+    @Override
+    public AnnotationItem getAnnotation(TypeKey typeKey){
+        return CollectionUtil.getFirst(getAnnotations(typeKey));
+    }
+    public AnnotationItem getOrCreateAnnotation(TypeKey typeKey){
+        return getDefinition().getOrCreateAnnotationSet().getOrCreate(typeKey);
+    }
+    public Iterator<DexInstruction> getInstructions(Opcode<?> opcode) {
+        return getInstructions(ins -> ins.getOpcode() == opcode);
+    }
+    public Iterator<DexInstruction> getInstructions(Predicate<? super Ins> filter) {
+        Iterator<Ins> iterator = FilterIterator.of(getDefinition().getInstructions(), filter);
+        return ComputeIterator.of(iterator, this::create);
     }
     public Iterator<DexInstruction> getInstructions() {
-        return ComputeIterator.of(getMethodDef().getInstructions(), this::create);
+        return ComputeIterator.of(getDefinition().getInstructions(), this::create);
+    }
+    public DexInstruction getInstruction(int i){
+        return create(getDefinition().getInstruction(i));
+    }
+    public DexInstruction addInstruction(Opcode<?> opcode){
+        return create(getDefinition().getOrCreateInstructionList().createNext(opcode));
+    }
+    public int getInstructionsCount(){
+        return getDefinition().getInstructionsCount();
+    }
+    public void setParameterRegistersCount(int count){
+        CodeItem codeItem = getDefinition().getOrCreateCodeItem();
+        if(codeItem != null){
+            codeItem.setParameterRegistersCount(count);
+        }
+    }
+    public void setLocalRegistersCount(int count){
+        CodeItem codeItem = getDefinition().getOrCreateCodeItem();
+        if(codeItem != null){
+            codeItem.setRegistersCount(codeItem.getParameterRegistersCount() + count);
+        }
     }
     private DexInstruction create(Ins ins){
-        return new DexInstruction(this, ins);
+        if(ins != null){
+            return new DexInstruction(this, ins);
+        }
+        return null;
     }
 
     @Override
-    public String getKey(){
-        return getMethodId().getKey(false, false);
+    public MethodKey getKey(){
+        return getId().getKey();
     }
     @Override
-    public String getClassName() {
-        return getMethodId().getClassName();
+    public MethodId getId() {
+        return getDefinition().getId();
     }
-    public MethodId getMethodId() {
-        return getMethodDef().getMethodId();
-    }
+    @Override
     public DexClass getDexClass() {
         return dexClass;
     }
-    public MethodDef getMethodDef() {
+    @Override
+    public MethodDef getDefinition() {
         return methodDef;
     }
-
+    public boolean isConstructor() {
+        return AccessFlag.CONSTRUCTOR.isSet(getAccessFlagsValue());
+    }
+    public boolean isBridge() {
+        return AccessFlag.BRIDGE.isSet(getAccessFlagsValue());
+    }
+    public boolean isDirect(){
+        return isConstructor() || isPrivate() || isStatic();
+    }
     @Override
     public void append(SmaliWriter writer) throws IOException {
-        getMethodDef().append(writer);
+        getDefinition().append(writer);
     }
     @Override
     public boolean equals(Object obj) {
@@ -115,6 +219,6 @@ public class DexMethod extends DexDef {
             return false;
         }
         DexMethod dexMethod = (DexMethod) obj;
-        return MethodId.equals(true, getMethodId(), dexMethod.getMethodId());
+        return MethodId.equals(true, getId(), dexMethod.getId());
     }
 }

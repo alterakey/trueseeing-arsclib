@@ -20,6 +20,7 @@ import com.reandroid.arsc.coder.ThreeByteCharsetDecoder;
 import com.reandroid.arsc.coder.XmlSanitizer;
 import com.reandroid.arsc.io.BlockReader;
 import com.reandroid.arsc.pool.StringPool;
+import com.reandroid.utils.ObjectsUtil;
 import com.reandroid.utils.StringsUtil;
 import com.reandroid.utils.collection.ComputeIterator;
 import com.reandroid.utils.collection.EmptyIterator;
@@ -38,13 +39,14 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Comparable<StringItem> {
-    private String mCache;
+public class StringItem extends StringBlock implements JSONConvert<JSONObject>, Comparable<StringItem> {
+
     private boolean mUtf8;
     private final Set<ReferenceItem> mReferencedList;
     private StyleItem mStyleToRemove;
+
     public StringItem(boolean utf8) {
-        super(0);
+        super();
         this.mUtf8=utf8;
         this.mReferencedList = new HashSet<>();
     }
@@ -185,26 +187,15 @@ public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Co
         }
         return styleItem.applyStyle(text, true, escapeXmlText);
     }
-    public String get(){
-        return mCache;
-    }
+    @Override
     public void set(String str){
-        String old=get();
-        if(str==null){
-            if(old==null){
-                return;
-            }
-        }else if(str.equals(old)){
-            return;
-        }
-        if(str==null){
-            StyleItem styleItem = getStyle();
-            if(styleItem!=null){
-                styleItem.clearStyle();
+        if(str == null){
+            StyleItem style = getStyle();
+            if(style != null){
+                style.clearStyle();
             }
         }
-        byte[] bts=encodeString(str);
-        setBytesInternal(bts);
+        super.set(str);
     }
 
     public boolean isUtf8(){
@@ -216,11 +207,6 @@ public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Co
         }
         mUtf8=utf8;
         onBytesChanged();
-    }
-    @Override
-    protected void onBytesChanged() {
-        // To save cpu/memory usage, better to decode once only when bytes changed
-        mCache=decodeString();
     }
     @Override
     public void onReadBytes(BlockReader reader) throws IOException {
@@ -237,22 +223,24 @@ public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Co
         if(reader.available()<4){
             return reader.available();
         }
-        byte[] bts=new byte[4];
+        byte[] bts = new byte[4];
         reader.readFully(bts);
         reader.offset(-4);
-        int[] len;
+        int[] lengthResult;
         if(isUtf8()){
-            len=decodeUtf8StringByteLength(bts);
+            lengthResult = decodeUtf8StringByteLength(bts);
         }else {
-            len=decodeUtf16StringByteLength(bts);
+            lengthResult = decodeUtf16StringByteLength(bts);
         }
-        int add=isUtf8()?1:2;
-        return len[0]+len[1]+add;
+        int add = isUtf8()? 1:2;
+        return lengthResult[0] + lengthResult[1] + add;
     }
-    String decodeString(){
-        return decodeString(getBytesInternal(), mUtf8);
+    @Override
+    protected String decodeString(byte[] bytes){
+        return decodeString(bytes, mUtf8);
     }
-    byte[] encodeString(String str){
+    @Override
+    protected byte[] encodeString(String str){
         if(mUtf8){
             return encodeUtf8ToBytes(str);
         }else {
@@ -303,7 +291,7 @@ public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Co
         if(styleItem==null){
             return false;
         }
-        return styleItem.getSpanInfoList().size()>0;
+        return styleItem.size()>0;
     }
     public StyleItem getStyle(){
         StringPool<?> stringPool = getParentInstance(StringPool.class);
@@ -368,9 +356,11 @@ public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Co
     }
     @Override
     public void fromJson(JSONObject json) {
-        String str = json.getString(NAME_string);
-        set(str);
         throw new IllegalArgumentException("Not implemented");
+    }
+    public void fromJson(JSONObject json, StyleItem styleItem) {
+        set(json.getString(NAME_string));
+        styleItem.fromJson(json.getJSONObject(NAME_style));
     }
     @Override
     public String toString(){
@@ -521,9 +511,8 @@ public class StringItem extends BlockItem implements JSONConvert<JSONObject>, Co
     }
 
     private static final CharsetDecoder UTF16LE_DECODER = StandardCharsets.UTF_16LE.newDecoder();
-    private static final CharsetDecoder UTF8_DECODER = StandardCharsets.UTF_8.newDecoder();
     private static final CharsetDecoder DECODER_3B = ThreeByteCharsetDecoder.INSTANCE;
 
-    public static final String NAME_string="string";
-    public static final String NAME_style="style";
+    public static final String NAME_string = ObjectsUtil.of("string");
+    public static final String NAME_style = ObjectsUtil.of("style");
 }

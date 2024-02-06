@@ -15,15 +15,16 @@
  */
 package com.reandroid.dex.ins;
 
-import com.reandroid.dex.writer.SmaliFormat;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.common.RegistersTable;
+import com.reandroid.dex.smali.SmaliFormat;
+import com.reandroid.dex.smali.SmaliWriter;
 import com.reandroid.utils.collection.IndexIterator;
 import com.reandroid.utils.collection.SizedSupplier;
 
 import java.io.IOException;
 import java.util.Iterator;
 
-public class RegistersIterator implements SizedSupplier<Reg>, Iterable<Reg>, SmaliFormat {
+public class RegistersIterator implements SizedSupplier<RegisterReference>, Iterable<RegisterReference>, SmaliFormat {
 
     private final RegistersTable registersTable;
     private final RegistersSet registersSet;
@@ -34,15 +35,21 @@ public class RegistersIterator implements SizedSupplier<Reg>, Iterable<Reg>, Sma
     }
 
     @Override
-    public Reg get(int index) {
-        return new Reg(getRegistersTable(), getRegistersSet(), index);
+    public RegisterReference get(int index) {
+        return new RegisterReference(getRegistersTable(), getRegistersSet(), index);
     }
     @Override
     public int size() {
         return getRegistersSet().getRegistersCount();
     }
+    public void setSize(int size){
+        getRegistersSet().setRegistersCount(size);
+    }
+    public boolean isRange(){
+        return getRegistersSet().isRegistersRange();
+    }
     @Override
-    public Iterator<Reg> iterator() {
+    public Iterator<RegisterReference> iterator() {
         return new IndexIterator<>(this);
     }
     public RegistersSet getRegistersSet() {
@@ -71,6 +78,36 @@ public class RegistersIterator implements SizedSupplier<Reg>, Iterable<Reg>, Sma
             }
             get(i).append(writer);
         }
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (!(obj instanceof RegistersIterator)) {
+            return false;
+        }
+        RegistersIterator iterator = (RegistersIterator) obj;
+        int size = size();
+        if(size != iterator.size()){
+            return false;
+        }
+        for(int i = 0; i < size; i++){
+            if(!get(i).equals(iterator.get(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+    @Override
+    public int hashCode() {
+        int hash = 1;
+        int size = size();
+        for(int i = 0; i < size; i++){
+            hash = hash * 31 + get(i).hashCode();
+        }
+        return hash;
     }
 
     @Override

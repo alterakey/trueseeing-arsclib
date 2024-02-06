@@ -15,39 +15,37 @@
  */
 package com.reandroid.dex.common;
 
+import com.reandroid.dex.smali.SmaliReader;
 import com.reandroid.utils.StringsUtil;
 
-public class AnnotationVisibility {
-    private static final AnnotationVisibility[] VALUES;
+public class AnnotationVisibility extends Modifier{
+
     public static final AnnotationVisibility BUILD;
     public static final AnnotationVisibility RUNTIME;
     public static final AnnotationVisibility SYSTEM;
 
+    private static final AnnotationVisibility[] VALUES;
+
     static {
-        VALUES = new AnnotationVisibility[3];
-        BUILD = new AnnotationVisibility("build", 0);
-        VALUES[0] = BUILD;
-        RUNTIME = new AnnotationVisibility("runtime", 1);
-        VALUES[1] = RUNTIME;
-        SYSTEM = new AnnotationVisibility("system", 2);
-        VALUES[2] = SYSTEM;
+
+        BUILD = new AnnotationVisibility(0, "build");
+        RUNTIME = new AnnotationVisibility(1, "runtime");
+        SYSTEM = new AnnotationVisibility(2, "system");
+        VALUES = new AnnotationVisibility[]{
+                BUILD,
+                RUNTIME,
+                SYSTEM
+        };
+
     }
 
-    private final String name;
-    private final int value;
-    private AnnotationVisibility(String name, int value){
-        this.name = name;
-        this.value = value;
+    private AnnotationVisibility(int value, String name){
+        super(value, name);
     }
-    public String getName() {
-        return name;
-    }
-    public int getValue() {
-        return value;
-    }
+
     @Override
-    public String toString() {
-        return getName();
+    public boolean isSet(int value) {
+        return value == this.getValue();
     }
 
     public static AnnotationVisibility valueOf(int visibility) {
@@ -56,8 +54,7 @@ public class AnnotationVisibility {
         }
         return VALUES[visibility];
     }
-
-    public static AnnotationVisibility getVisibility(String visibility) {
+    public static AnnotationVisibility valueOf(String visibility) {
         visibility = StringsUtil.toLowercase(visibility);
         if (visibility.equals("build")) {
             return BUILD;
@@ -70,5 +67,14 @@ public class AnnotationVisibility {
         }
         return null;
     }
-
+    public static AnnotationVisibility parse(SmaliReader reader){
+        reader.skipSpaces();
+        int position = reader.position();
+        int length = reader.indexOfWhiteSpace() - position;
+        AnnotationVisibility visibility = valueOf(reader.readString(length));
+        if(visibility == null){
+            reader.position(position);
+        }
+        return visibility;
+    }
 }

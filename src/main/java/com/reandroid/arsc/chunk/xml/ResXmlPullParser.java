@@ -143,7 +143,7 @@ public class ResXmlPullParser implements XmlResourceParser {
     public int getAttributeNameResource(int index) {
         ResXmlAttribute attribute = getResXmlAttributeAt(index);
         if(attribute!=null){
-            return attribute.getNameResourceID();
+            return attribute.getNameId();
         }
         return 0;
     }
@@ -314,7 +314,7 @@ public class ResXmlPullParser implements XmlResourceParser {
         if(currentElement != null){
             ResXmlAttribute attribute = currentElement.getIdAttribute();
             if(attribute != null){
-                return attribute.getNameResourceID();
+                return attribute.getNameId();
             }
         }
         return 0;
@@ -325,7 +325,7 @@ public class ResXmlPullParser implements XmlResourceParser {
         if(currentElement != null){
             ResXmlAttribute attribute = currentElement.getStyleAttribute();
             if(attribute != null){
-                return attribute.getNameResourceID();
+                return attribute.getNameId();
             }
         }
         return 0;
@@ -392,7 +392,7 @@ public class ResXmlPullParser implements XmlResourceParser {
         }
         ResXmlElement element = getCurrentElement();
         while(element!=null && element.getDepth()>depth){
-            element=element.getParentResXmlElement();
+            element=element.getParentElement();
         }
         if(element!=null){
             return element.getNamespaceCount();
@@ -496,7 +496,7 @@ public class ResXmlPullParser implements XmlResourceParser {
     public boolean isEmptyElementTag() throws XmlPullParserException {
         ResXmlElement element = getCurrentElement();
         if(element!=null){
-            return element.countResXmlNodes() == 0 && element.getAttributeCount()==0;
+            return element.size() == 0 && element.getAttributeCount()==0;
         }
         return true;
     }

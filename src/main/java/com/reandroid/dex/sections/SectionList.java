@@ -21,20 +21,31 @@ import com.reandroid.arsc.container.BlockList;
 import com.reandroid.arsc.container.FixedBlockContainer;
 import com.reandroid.arsc.io.BlockReader;
 import com.reandroid.arsc.item.IntegerReference;
-import com.reandroid.dex.base.IntegerPair;
-import com.reandroid.dex.base.NumberIntegerReference;
+import com.reandroid.dex.base.BlockListArray;
+import com.reandroid.arsc.item.NumberIntegerReference;
 import com.reandroid.arsc.base.OffsetSupplier;
+import com.reandroid.dex.common.FullRefresh;
+import com.reandroid.dex.common.SectionItem;
+import com.reandroid.dex.common.SectionTool;
+import com.reandroid.dex.data.StringData;
 import com.reandroid.dex.header.DexHeader;
-import com.reandroid.dex.index.IdSectionEntry;
-import com.reandroid.utils.collection.ArrayIterator;
+import com.reandroid.dex.id.ClassId;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.key.*;
+import com.reandroid.dex.smali.model.SmaliClass;
+import com.reandroid.utils.collection.ArrayCollection;
 import com.reandroid.utils.collection.ArraySupplierIterator;
-import com.reandroid.utils.collection.ComputeIterator;
+import com.reandroid.utils.collection.CollectionUtil;
+import com.reandroid.utils.collection.CombiningIterator;
 
 import java.io.IOException;
 import java.util.*;
+import java.util.function.Predicate;
 
 public class SectionList extends FixedBlockContainer
-        implements OffsetSupplier, Iterable<Section<?>> , ArraySupplier<Section<?>> {
+        implements SectionTool, OffsetSupplier, Iterable<Section<?>> ,
+        ArraySupplier<Section<?>>, FullRefresh {
+
     private final IntegerReference baseOffset;
     private final DexHeader dexHeader;
     private final Section<DexHeader> dexHeaderSection;
@@ -44,6 +55,10 @@ public class SectionList extends FixedBlockContainer
     private final Map<SectionType<?>, Section<?>> typeMap;
     private final MapList mapList;
 
+    private boolean immediateIdSort;
+
+    private boolean mReading;
+
     public SectionList() {
         super(4);
 
@@ -51,23 +66,14 @@ public class SectionList extends FixedBlockContainer
         this.idSectionList = new BlockList<>();
         this.dataSectionList = new BlockList<>();
 
-        IntegerPair headerCountAndOffset = IntegerPair.of(
-                new NumberIntegerReference(),
-                baseOffset);
-
-        headerCountAndOffset.getFirst().set(1);
-
-        Section<DexHeader> dexHeaderSection = new Section<>(headerCountAndOffset, SectionType.HEADER);
+        Section<DexHeader> dexHeaderSection = SectionType
+                .HEADER.createSpecialSection(baseOffset);
         DexHeader dexHeader = new DexHeader(baseOffset);
         dexHeaderSection.add(dexHeader);
+
         this.dexHeaderSection = dexHeaderSection;
 
-        IntegerPair mapListCountAndOffset = IntegerPair.of(
-                new NumberIntegerReference(),
-                dexHeader.map);
-        mapListCountAndOffset.getFirst().set(1);
-
-        Section<MapList> mapListSection = new Section<>(mapListCountAndOffset, SectionType.MAP_LIST);
+        Section<MapList> mapListSection = SectionType.MAP_LIST.createSpecialSection(dexHeader.map);
         MapList mapList = new MapList(dexHeader.map);
         mapListSection.add(mapList);
         this.mapListSection = mapListSection;
@@ -86,23 +92,48 @@ public class SectionList extends FixedBlockContainer
         typeMap.put(SectionType.MAP_LIST, mapListSection);
     }
 
-    public void clearUsageTypes(){
-        for (Section<?> section : this) {
-            section.clearUsageTypes();
+    public void shrink(){
+        clearUnused();
+        clearDuplicateData();
+    }
+    public void clearDuplicateData(){
+        refresh();
+        SectionType<?>[] remove = SectionType.getRemoveOrderList();
+        for (SectionType<?> sectionType : remove) {
+            Section<?> section = getSection(sectionType);
+            if(section == null){
+                continue;
+            }
+            int count = section.getPool().clearDuplicates();
+            if(count == 0){
+                continue;
+            }
+            section.refresh();
+        }
+        refresh();
+    }
+    public void clearUnused(){
+        clearUsageTypes();
+        refresh();
+        Iterator<Section<?>> iterator = getSections();
+        while (iterator.hasNext()) {
+            iterator.next().clearUnused();
         }
     }
-    @SuppressWarnings("unchecked")
-    public Iterator<Section<IdSectionEntry>> getIndexSections(){
-        Iterator<Section<?>> iterator = iterator();
-        return ComputeIterator.of(iterator, section -> {
-            if(section.getSectionType().isIdSection()){
-                return (Section<IdSectionEntry>) section;
-            }
-            return null;
-        });
+    public void clearEmptySections(){
+        List<Section<?>> sections = CollectionUtil.toList(getSections());
+        for (Section<?> section : sections) {
+            section.removeIfEmpty();
+        }
+    }
+    private void clearUsageTypes(){
+        Iterator<Section<?>> iterator = getSections();
+        while (iterator.hasNext()) {
+            iterator.next().clearUsageTypes();
+        }
     }
     public void updateHeader() {
-        Block parent = getParentInstance(DexFileBlock.class);
+        Block parent = getParentInstance(DexLayout.class);
         if(parent == null){
             parent = this;
         }
@@ -110,34 +141,26 @@ public class SectionList extends FixedBlockContainer
     }
 
     @Override
-    protected void onPreRefresh() {
-        super.onPreRefresh();
-        updateIdCounts();
-    }
-
-    @Override
     protected void onRefreshed() {
         super.onRefreshed();
         mapList.refresh();
-        //mapList.updateHeader(dexHeader);
-    }
-    private void updateIdCounts(){
-        for(Section<?> section : this){
-            Section<?> idSection = get(
-                    section.getSectionType().getIdSectionType());
-            if(idSection == null){
-                continue;
-            }
-            idSection.getItemArray()
-                    .setChildesCount(section.getCount());
-        }
     }
 
     @Override
     public void onReadBytes(BlockReader reader) throws IOException {
-        get(SectionType.HEADER).readBytes(reader);
-        get(SectionType.MAP_LIST).readBytes(reader);
-
+        readSections(reader, null);
+    }
+    void readSections(BlockReader reader, Predicate<SectionType<?>> filter) throws IOException {
+        mReading = true;
+        readSpecialSections(reader);
+        readBody(reader, filter);
+        mReading = false;
+    }
+    private void readSpecialSections(BlockReader reader) throws IOException {
+        getSection(SectionType.HEADER).readBytes(reader);
+        getSection(SectionType.MAP_LIST).readBytes(reader);
+    }
+    private void readBody(BlockReader reader, Predicate<SectionType<?>> filter) throws IOException {
         MapItem[] mapItemList = mapList.getReadSorted();
         int length = mapItemList.length;
         for(int i = 0; i < length; i++){
@@ -145,17 +168,24 @@ public class SectionList extends FixedBlockContainer
             if(mapItem == null){
                 continue;
             }
+            if(filter != null && !filter.test(mapItem.getSectionType())){
+                continue;
+            }
             loadSection(mapItem, reader);
         }
-        idSectionList.sort(getIdOffsetComparator());
-        dataSectionList.sort(getDataOffsetComparator());
+
+        idSectionList.trimToSize();
+        dataSectionList.trimToSize();
+
+        idSectionList.sort(getOffsetComparator());
+        dataSectionList.sort(getOffsetComparator());
         mapList.linkHeader(dexHeader);
     }
     private void loadSection(MapItem mapItem, BlockReader reader) throws IOException {
         if(mapItem == null){
             return;
         }
-        SectionType<?> sectionType = mapItem.getMapType();
+        SectionType<?> sectionType = mapItem.getSectionType();
         if(typeMap.containsKey(sectionType)){
             return;
         }
@@ -166,7 +196,11 @@ public class SectionList extends FixedBlockContainer
         add(section);
         section.readBytes(reader);
     }
-    public<T1 extends Block> Section<T1> add(Section<T1> section){
+    @Override
+    public boolean isReading(){
+        return mReading;
+    }
+    public<T1 extends SectionItem> Section<T1> add(Section<T1> section){
         if(section instanceof IdSection){
             idSectionList.add((IdSection<?>) section);
         }else {
@@ -182,58 +216,110 @@ public class SectionList extends FixedBlockContainer
         return mapList;
     }
 
+    public void remove(Section<?> section){
+        if(section == null){
+            return;
+        }
+        SectionType<?> sectionType = section.getSectionType();
+        if(typeMap.remove(sectionType) != section){
+            return;
+        }
+        section.onRemove(this);
+        if(sectionType.isDataSection()){
+            dataSectionList.remove((DataSection<?>) section);
+        }else if(sectionType.isIdSection()){
+            idSectionList.remove((IdSection<?>) section);
+        }
+    }
+    public void clear(){
+        Iterator<Section<?>> iterator = getSections();
+        while (iterator.hasNext()){
+            Section<?> section = iterator.next();
+            section.onRemove(this);
+        }
+        idSectionList.clearChildes();
+        dataSectionList.clearChildes();
+        typeMap.clear();
+    }
+    public void clearPools(){
+        for(Section<?> section : this){
+            section.clearPool();
+        }
+    }
     public void sortSection(SectionType<?>[] order){
+        //WARN: DO NOT CALL refresh() HERE
         idSectionList.sort(SectionType.comparator(order, Section::getSectionType));
         dataSectionList.sort(SectionType.comparator(order, Section::getSectionType));
         mapList.sortMapItems(order);
     }
-    public void sortStrings(){
-        if(!sortItems(SectionType.STRING_DATA)){
-            return;
+    @Override
+    public void refreshFull(){
+        SectionType<?>[] sortOrder = SectionType.getSortSectionsOrder();
+        for(SectionType<?> sectionType : sortOrder){
+            Section<?> section = getSection(sectionType);
+            if(section != null){
+                section.refreshFull();
+            }
         }
-        if(!sortItems(SectionType.STRING_ID)){
-            return;
+        clearUnused();
+        clearDuplicateData();
+    }
+    public boolean sortStrings(){
+        boolean result = false;
+        Section<StringData> stringDataSection = getSection(SectionType.STRING_DATA);
+        if(stringDataSection != null){
+            result = stringDataSection.sort();
         }
-        if(!sortItems(SectionType.TYPE_ID)){
-            return;
+        if(sortItems(SectionType.STRING_ID)){
+            result = true;
         }
-        sortItems(SectionType.PROTO_ID);
-        sortItems(SectionType.FIELD_ID);
-        sortItems(SectionType.METHOD_ID);
-        sortItems(SectionType.CLASS_ID);
+        if(sortItems(SectionType.TYPE_ID)){
+            result = true;
+        }
+        if(sortItems(SectionType.PROTO_ID)){
+            result = true;
+        }
+        if(sortItems(SectionType.FIELD_ID)){
+            result = true;
+        }
+        if(sortItems(SectionType.METHOD_ID)){
+            result = true;
+        }
+        if(sortItems(SectionType.CLASS_ID)){
+            result = true;
+        }
+        return result;
     }
     private boolean sortItems(SectionType<?> sectionType){
-        Section<?> section = get(sectionType);
+        Section<?> section = getSection(sectionType);
         if(section != null){
-            section.sort();
-            return true;
+            return section.sort();
         }
         return false;
     }
-    public<T1 extends Block> T1 get(SectionType<T1> sectionType, int i){
-        Section<T1> section = get(sectionType);
+    public<T1 extends SectionItem> T1 getLoaded(SectionType<T1> sectionType, Key key){
+        Section<T1> section = getSection(sectionType);
         if(section != null){
-            return section.get(i);
-        }
-        return null;
-    }
-    public<T1 extends Block> T1[] get(SectionType<T1> sectionType, int[] indexes){
-        Section<T1> section = get(sectionType);
-        if(section != null){
-            return section.get(indexes);
+            return section.getSectionItem(key);
         }
         return null;
     }
     @SuppressWarnings("unchecked")
-    public<T1 extends Block> Section<T1> get(SectionType<T1> sectionType){
+    @Override
+    public<T1 extends SectionItem> Section<T1> getSection(SectionType<T1> sectionType){
         return (Section<T1>) typeMap.get(sectionType);
     }
-    public<T1 extends Block> Section<T1> getOrCreate(SectionType<T1> sectionType){
-        Section<T1> section = get(sectionType);
+    @Override
+    public SectionList getSectionList() {
+        return this;
+    }
+    @Override
+    public<T1 extends SectionItem> Section<T1> getOrCreateSection(SectionType<T1> sectionType){
+        Section<T1> section = getSection(sectionType);
         if(section != null){
             return section;
         }
-        if(sectionType == SectionType.MAP_LIST){
+        if(sectionType == SectionType.MAP_LIST || sectionType == SectionType.HEADER){
             return null;
         }
         MapList mapList = getMapList();
@@ -241,7 +327,7 @@ public class SectionList extends FixedBlockContainer
         section = mapItem.createNewSection();
         add(section);
         sortSection(SectionType.getR8Order());
-
+        mapItem.link(getHeader());
         return section;
     }
 
@@ -273,6 +359,70 @@ public class SectionList extends FixedBlockContainer
         }
         return dataSectionList.get(i - 1 - idSectionList.size());
     }
+
+    public boolean contains(Key key){
+        if(key == null){
+            return false;
+        }
+        if(key instanceof StringKey){
+            return contains(SectionType.STRING_ID, key);
+        }
+        if(key instanceof TypeKey){
+            return contains(SectionType.TYPE_ID, key);
+        }
+        if(key instanceof FieldKey){
+            return contains(SectionType.FIELD_ID, key);
+        }
+        if(key instanceof ProtoKey){
+            return contains(SectionType.PROTO_ID, key);
+        }
+        if(key instanceof MethodKey){
+            return contains(SectionType.METHOD_ID, key);
+        }
+        if(key instanceof TypeListKey){
+            return contains(SectionType.TYPE_LIST, key);
+        }
+        throw new IllegalArgumentException("Unknown key type: " + key.getClass() + ", '" + key + "'");
+    }
+    private boolean contains(SectionType<?> sectionType, Key key){
+        Section<?> section = getSection(sectionType);
+        if(section != null){
+            return section.contains(key);
+        }
+        return false;
+    }
+
+    public boolean isImmediateIdSort() {
+        return immediateIdSort;
+    }
+    public void setImmediateIdSort(boolean immediateIdSort) {
+        this.immediateIdSort = immediateIdSort;
+    }
+
+    public void keyChanged(Block item, SectionType<?> sectionType, Key oldKey){
+        Section<?> section = getSection(sectionType);
+        if(section == null){
+            return;
+        }
+        section.keyChanged(item, oldKey, isImmediateIdSort());
+        if(sectionType == SectionType.TYPE_ID){
+            ClassId classId = getLoaded(SectionType.CLASS_ID, oldKey);
+            if(classId != null){
+                // getKey() call triggers keyChanged event
+                classId.getKey();
+            }
+            //TODO: notify to all uses TypeKey
+        }
+    }
+    public Iterator<Section<?>> getSections() {
+        return new CombiningIterator<>(getIdSections(), getDataSections());
+    }
+    public Iterator<IdSection<?>> getIdSections() {
+        return idSectionList.iterator();
+    }
+    public Iterator<DataSection<?>> getDataSections() {
+        return dataSectionList.iterator();
+    }
     @Override
     public int getCount(){
         return 2 + idSectionList.size() + dataSectionList.size();
@@ -286,20 +436,119 @@ public class SectionList extends FixedBlockContainer
         return baseOffset;
     }
 
-    private static Comparator<IdSection<?>> getIdOffsetComparator() {
-        return new Comparator<IdSection<?>>() {
-            @Override
-            public int compare(IdSection<?> section1, IdSection<?> section2) {
-                return Integer.compare(section1.getOffset(), section2.getOffset());
+    private boolean canAdd(Collection<IdItem> usedIds) {
+        Iterator<IdSection<?>> idSections = getIdSections();
+        while (idSections.hasNext()){
+            IdSection<?> section = idSections.next();
+            if(!section.canAdd(usedIds)){
+                return false;
             }
-        };
+        }
+        return true;
     }
-    private static Comparator<DataSection<?>> getDataOffsetComparator() {
-        return new Comparator<DataSection<?>>() {
-            @Override
-            public int compare(DataSection<?> section1, DataSection<?> section2) {
-                return Integer.compare(section1.getOffset(), section2.getOffset());
+    public boolean merge(MergeOptions options, ClassId classId){
+        if(classId == null){
+            options.onMergeError(getParentInstance(DexLayout.class), classId, "Null class id");
+            return false;
+        }
+        if(classId.getParent() == null){
+            options.onMergeError(getParentInstance(DexLayout.class), classId, "Destroyed class id");
+            return false;
+        }
+        if(classId.getParent(SectionList.class) == this){
+            options.onMergeError(getParentInstance(DexLayout.class), classId, "Class id is on same section");
+            return false;
+        }
+        if(options.skipMerging(classId, classId.getKey())){
+            return false;
+        }
+        if(contains(SectionType.CLASS_ID, classId.getKey())){
+            options.onDuplicate(classId);
+            return false;
+        }
+        ArrayCollection<IdItem> collection = classId.listUsedIds();
+        if(!canAdd(collection)){
+            options.onDexFull(getParentInstance(DexLayout.class), classId);
+            return false;
+        }
+        Section<ClassId> mySection = getOrCreateSection(SectionType.CLASS_ID);
+
+        ClassId myClass = mySection.getOrCreate(classId.getKey());
+        myClass.merge(classId);
+        if(options.relocateClass()){
+            classId.removeSelf();
+        }
+        options.onMergeSuccess(classId, classId.getKey());
+        return true;
+    }
+    public boolean merge(MergeOptions options, SectionList sectionList){
+        if(sectionList == this){
+            options.onMergeError(getParentInstance(DexLayout.class), sectionList, "Can not merge with self");
+            return false;
+        }
+        if(sectionList.getParent() == null){
+            options.onMergeError(getParentInstance(DexLayout.class), sectionList, "Destroyed section list");
+            return false;
+        }
+        Section<ClassId> comingSection = sectionList.getSection(SectionType.CLASS_ID);
+        if(comingSection == null || comingSection.getCount() == 0){
+            return false;
+        }
+        boolean mergedOnce = false;
+        boolean mergedAll = true;
+        Section<ClassId> mySection = getOrCreateSection(SectionType.CLASS_ID);
+        BlockListArray<ClassId> comingArray = comingSection.getItemArray();
+        int size = comingArray.size() - 1;
+        for (int i = size; i >= 0; i--){
+            ClassId coming = comingArray.get(i);
+            TypeKey key = coming.getKey();
+            if(options.skipMerging(coming, key)){
+                continue;
             }
+            if(mySection.contains(key)){
+                options.onDuplicate(coming);
+                continue;
+            }
+            ArrayCollection<IdItem> collection = coming.listUsedIds();
+            if(!canAdd(collection)){
+                mergedAll = false;
+                options.onDexFull(this.getParentInstance(DexLayout.class), coming);
+                break;
+            }
+            ClassId classId = mySection.getOrCreate(coming.getKey());
+            classId.merge(coming);
+            options.onMergeSuccess(coming, key);
+            if(options.relocateClass()){
+                coming.removeSelf();
+            }
+            mergedOnce = true;
+        }
+        if(comingSection.getCount() == 0){
+            SectionList comingSectionSectionList = comingSection.getSectionList();
+            DexLayout dexLayout = comingSectionSectionList
+                    .getParentInstance(DexLayout.class);
+            dexLayout.clear();
+        }
+        if(mergedOnce){
+            refresh();
+            sortStrings();
+            refresh();
+        }
+        return mergedAll;
+    }
+    public void fromSmali(SmaliClass smaliClass) throws IOException {
+        ClassId classId = getOrCreateSectionItem(SectionType.CLASS_ID, smaliClass.getKey());
+        classId.fromSmali(smaliClass);
+    }
+    private static<T1 extends Section<?>> Comparator<T1> getOffsetComparator() {
+        return (section1, section2) -> {
+            if(section1 == section2){
+                return 0;
+            }
+            if(section1 == null){
+                return 1;
+            }
+            return section1.compareOffset(section2);
         };
     }
 }

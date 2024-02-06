@@ -15,22 +15,25 @@
  */
 package com.reandroid.dex.model;
 
-import com.reandroid.dex.common.AccessFlag;
-import com.reandroid.dex.index.FieldId;
-import com.reandroid.dex.item.AnnotationSet;
-import com.reandroid.dex.item.FieldDef;
-import com.reandroid.dex.pool.DexIdPool;
+import com.reandroid.dex.data.AnnotationItem;
+import com.reandroid.dex.id.FieldId;
+import com.reandroid.dex.data.AnnotationSet;
+import com.reandroid.dex.data.FieldDef;
+import com.reandroid.dex.key.FieldKey;
+import com.reandroid.dex.key.TypeKey;
 import com.reandroid.dex.sections.Section;
 import com.reandroid.dex.sections.SectionType;
 import com.reandroid.dex.value.DexValueBlock;
 import com.reandroid.dex.value.DexValueType;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.utils.collection.CollectionUtil;
+import com.reandroid.utils.collection.ExpandIterator;
+import com.reandroid.utils.collection.FilterIterator;
 
 import java.io.IOException;
 import java.util.Iterator;
-import java.util.Objects;
 
-public class DexField extends DexDef {
+public class DexField extends DexDeclaration {
 
     private final DexClass dexClass;
     private final FieldDef fieldDef;
@@ -41,71 +44,60 @@ public class DexField extends DexDef {
     }
 
     public FieldId getOrCreate(DexFile dexFile){
-        Section<FieldId> section = dexFile.get(SectionType.FIELD_ID);
-        DexIdPool<FieldId> pool = section.getPool();
-        FieldId fieldId = pool.get(this.getFieldId().getKey());
-        if(fieldId != null){
-            return fieldId;
-        }
-        fieldId = section.createItem();
-        fieldId.setName(getName());
-        fieldId.setClassType(getClassName());
-        fieldId.setFieldType(getFieldType());
-        pool.add(fieldId);
-        System.err.println("Created: " + fieldId);
-        return fieldId;
+        Section<FieldId> section = dexFile.getSection(SectionType.FIELD_ID);
+        return section.getOrCreate(getKey());
     }
-    public String getAccessFlags() {
-        return AccessFlag.formatForField(getFieldDef().getAccessFlagsValue());
-    }
-    @Override
-    int getAccessFlagsValue() {
-        return getFieldDef().getAccessFlagsValue();
-    }
+
     public String getName(){
-        return getFieldId().getName();
+        return getId().getName();
     }
     public void setName(String name){
-        getFieldId().setName(name);
-    }
-    public String getFieldType(){
-        return getFieldId().getFieldTypeName();
-    }
-    public void setFieldType(String type){
-        getFieldId().setFieldType(type);
+        getId().setName(name);
     }
 
     public DexValue getInitialValue() {
-        DexValueBlock<?> dexValueBlock = getFieldDef().getStaticInitialValue();
-        if(dexValueBlock != null){
-            return new DexValue(dexValueBlock);
-        }
-        return null;
+        return DexValue.create(this, getDefinition().getStaticInitialValue());
     }
     public<T1 extends DexValueBlock<?>> T1 getOrCreateInitialValue(DexValueType<T1> dexValueType) {
-        return getFieldDef().getOrCreateStaticValue(dexValueType);
+        return getDefinition().getOrCreateStaticValue(dexValueType);
     }
 
     @Override
-    public String getKey(){
-        return getFieldId().getName();
+    public FieldKey getKey(){
+        return getId().getKey();
     }
     @Override
-    public String getClassName() {
-        return getFieldId().getClassName();
+    public FieldId getId() {
+        return getDefinition().getId();
     }
-    public FieldId getFieldId() {
-        return getFieldDef().getFieldId();
-    }
+    @Override
     public DexClass getDexClass() {
         return dexClass;
     }
-    public FieldDef getFieldDef() {
+    @Override
+    public FieldDef getDefinition() {
         return fieldDef;
     }
-    public Iterator<AnnotationSet> getAnnotations(){
-        getFieldDef().setClassId(getDexClass().getClassId());
-        return getFieldDef().getAnnotations();
+    public Iterator<AnnotationSet> getAnnotationSets(){
+        return getDefinition().getAnnotations();
+    }
+    @Override
+    public Iterator<AnnotationItem> getAnnotations(){
+        return ExpandIterator.of(getAnnotationSets());
+    }
+    @Override
+    public Iterator<AnnotationItem> getAnnotations(TypeKey typeKey){
+        return FilterIterator.of(getAnnotations(),
+                item -> typeKey.equals(item.getTypeKey()));
+    }
+    @Override
+    public AnnotationItem getAnnotation(TypeKey typeKey){
+        return CollectionUtil.getFirst(getAnnotations(typeKey));
+    }
+
+    @Override
+    public void append(SmaliWriter writer) throws IOException {
+        getDefinition().append(writer);
     }
 
     @Override
@@ -117,11 +109,6 @@ public class DexField extends DexDef {
             return false;
         }
         DexField dexField = (DexField) obj;
-        return FieldId.equals(getFieldId(), dexField.getFieldId());
-    }
-
-    @Override
-    public void append(SmaliWriter writer) throws IOException {
-        getFieldDef().append(writer);
+        return FieldId.equals(getId(), dexField.getId());
     }
 }

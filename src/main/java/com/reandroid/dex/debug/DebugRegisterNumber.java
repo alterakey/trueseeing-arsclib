@@ -16,11 +16,13 @@
 package com.reandroid.dex.debug;
 
 import com.reandroid.dex.base.Ule128Item;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliDebug;
+import com.reandroid.dex.smali.model.SmaliDebugRegister;
 
 import java.io.IOException;
 
-class DebugRegisterNumber extends DebugElement {
+abstract class DebugRegisterNumber extends DebugElement {
 
     private final Ule128Item registerNumber;
 
@@ -36,15 +38,49 @@ class DebugRegisterNumber extends DebugElement {
     public int getRegisterNumber() {
         return registerNumber.get();
     }
-    public void setRegisterNumber(int registerNumber){
-        this.registerNumber.set(registerNumber);
+    public void setRegister(int register){
+        this.registerNumber.set(register);
     }
 
+    @Override
     public void appendExtra(SmaliWriter writer) throws IOException {
-        writer.append(getElementType().getOpcode());
-        writer.append(" v");
-        writer.append(getRegisterNumber());
+        getSmaliDirective().append(writer);
+        writer.appendRegister(getRegisterNumber());
     }
+
+    @Override
+    public void merge(DebugElement element){
+        super.merge(element);
+        DebugRegisterNumber coming = (DebugRegisterNumber) element;
+        this.registerNumber.set(coming.registerNumber.get());
+    }
+
+    @Override
+    public void fromSmali(SmaliDebug smaliDebug) throws IOException {
+        super.fromSmali(smaliDebug);
+        SmaliDebugRegister smaliDebugRegister = (SmaliDebugRegister) smaliDebug;
+        setRegister(smaliDebugRegister.getRegister().getValue());
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj) {
+            return true;
+        }
+        if (obj == null || getClass() != obj.getClass()) {
+            return false;
+        }
+        DebugRegisterNumber debug = (DebugRegisterNumber) obj;
+        return getFlag() == debug.getFlag() &&
+                registerNumber.get() == debug.registerNumber.get();
+    }
+    @Override
+    public int hashCode() {
+        int hash = getFlag();
+        hash = hash * 31 + registerNumber.get();
+        return hash;
+    }
+
     @Override
     public String toString() {
         return getElementType() + " v" + getRegisterNumber();

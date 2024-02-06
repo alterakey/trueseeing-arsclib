@@ -15,7 +15,9 @@
  */
 package com.reandroid.dex.value;
 
-import com.reandroid.dex.index.MethodId;
+import com.reandroid.dex.id.MethodId;
+import com.reandroid.dex.key.Key;
+import com.reandroid.dex.key.MethodKey;
 import com.reandroid.dex.sections.SectionType;
 
 
@@ -23,6 +25,11 @@ public class MethodIdValue extends SectionIdValue<MethodId> {
 
     public MethodIdValue() {
         super(SectionType.METHOD_ID, DexValueType.METHOD);
+    }
+
+    @Override
+    public MethodKey getKey() {
+        return (MethodKey) super.getKey();
     }
 
     @Override

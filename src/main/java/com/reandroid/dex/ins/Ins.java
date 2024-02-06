@@ -15,29 +15,37 @@
  */
 package com.reandroid.dex.ins;
 
-import com.reandroid.arsc.item.IntegerReference;
-import com.reandroid.dex.base.NumberIntegerReference;
-import com.reandroid.dex.item.DexContainerItem;
-import com.reandroid.dex.item.InstructionList;
-import com.reandroid.dex.item.MethodDef;
-import com.reandroid.dex.writer.SmaliFormat;
-import com.reandroid.dex.writer.SmaliWriter;
+import com.reandroid.dex.base.DexException;
+import com.reandroid.dex.common.RegisterFormat;
+import com.reandroid.dex.debug.DebugElement;
+import com.reandroid.dex.debug.DebugLineNumber;
+import com.reandroid.dex.debug.DebugSequence;
+import com.reandroid.dex.data.FixedDexContainerWithTool;
+import com.reandroid.dex.data.InstructionList;
+import com.reandroid.dex.data.MethodDef;
+import com.reandroid.dex.id.IdItem;
+import com.reandroid.dex.key.Key;
+import com.reandroid.dex.smali.SmaliFormat;
+import com.reandroid.dex.smali.SmaliWriter;
+import com.reandroid.dex.smali.model.SmaliInstruction;
+import com.reandroid.utils.collection.CollectionUtil;
+import com.reandroid.utils.collection.EmptyIterator;
+import com.reandroid.utils.collection.InstanceIterator;
 
 import java.io.IOException;
 import java.io.StringWriter;
 import java.util.Iterator;
 
-public class Ins extends DexContainerItem implements SmaliFormat {
+public class Ins extends FixedDexContainerWithTool implements SmaliFormat {
 
     private final Opcode<?> opcode;
     private ExtraLineList extraLineList;
-    private final IntegerReference address;
+    private int address;
 
     Ins(int childesCount, Opcode<?> opcode) {
         super(childesCount);
         this.opcode = opcode;
         this.extraLineList = ExtraLineList.EMPTY;
-        this.address = new NumberIntegerReference();
     }
     Ins(Opcode<?> opcode) {
         this(1, opcode);
@@ -50,6 +58,20 @@ public class Ins extends DexContainerItem implements SmaliFormat {
         }
         return null;
     }
+    public DebugSequence getOrCreateDebugSequence(){
+        InstructionList instructionList = getInstructionList();
+        if(instructionList != null){
+            return instructionList.getOrCreateDebugSequence();
+        }
+        return null;
+    }
+    public DebugSequence getDebugSequence(){
+        InstructionList instructionList = getInstructionList();
+        if(instructionList != null){
+            return instructionList.getDebugSequence();
+        }
+        return null;
+    }
     public InstructionList getInstructionList() {
         return getParentInstance(InstructionList.class);
     }
@@ -59,11 +81,8 @@ public class Ins extends DexContainerItem implements SmaliFormat {
         Iterator<ExtraLine> iterator = getExtraLines();
         while (iterator.hasNext()) {
             ExtraLine extraLine = iterator.next();
-            if(extraLine instanceof Label){
-                Label label = (Label) extraLine;
-                if(address != label.getTargetAddress()){
-                    label.setTargetAddress(address);
-                }
+            if(address != extraLine.getTargetAddress()){
+                extraLine.setTargetAddress(address);
             }
         }
     }
@@ -81,24 +100,60 @@ public class Ins extends DexContainerItem implements SmaliFormat {
         }
         instructionList.replace(this, ins);
     }
+    public<T1 extends Ins> T1 replace(Opcode<T1> opcode){
+        InstructionList instructionList = getInstructionList();
+        if(instructionList == null){
+            throw new DexException("Missing parent "
+                    + InstructionList.class.getSimpleName());
+        }
+        return instructionList.replace(this, opcode);
+    }
+    public<T1 extends Ins> T1 createNext(Opcode<T1> opcode) {
+        InstructionList instructionList = getInstructionList();
+        if(instructionList == null){
+            throw new DexException("Parent " + getClass().getSimpleName() + " == null");
+        }
+        return instructionList.createAt(getIndex() + 1, opcode);
+    }
+    public Ins[] createNext(Opcode<?>[] opcodeArray) {
+        InstructionList instructionList = getInstructionList();
+        if(instructionList == null){
+            throw new DexException("Parent " + getClass().getSimpleName() + " == null");
+        }
+        return instructionList.createAt(getIndex() + 1, opcodeArray);
+    }
+
+    public boolean is(Opcode<?> opcode){
+        return opcode == getOpcode();
+    }
 
     public Opcode<?> getOpcode() {
         return opcode;
+    }
+    public RegisterFormat getRegisterFormat() {
+        return getOpcode().getRegisterFormat();
     }
 
     public int getCodeUnits(){
         return countBytes() / 2;
     }
-    public IntegerReference getAddressReference() {
-        return address;
+    public int getOutSize(){
+        return 0;
     }
     public int getAddress() {
-        return address.get();
+        return address;
     }
     public void setAddress(int address) {
-        this.address.set(address);
+        this.address = address;
     }
 
+    public boolean isLonelyInTryCatch(){
+        InstructionList instructionList = getInstructionList();
+        if(instructionList != null){
+            return instructionList.isLonelyInTryCatch(this);
+        }
+        return false;
+    }
     public void trimExtraLines(){
         this.extraLineList.trimToSize();
     }
@@ -108,8 +163,27 @@ public class Ins extends DexContainerItem implements SmaliFormat {
     public void addExtraLine(Iterator<ExtraLine> iterator){
         this.extraLineList = ExtraLineList.add(this.extraLineList, iterator);
     }
+    public DebugLineNumber getDebugLineNumber(){
+        return CollectionUtil.getFirst(getDebugLineNumbers());
+    }
+    public Iterator<DebugLineNumber> getDebugLineNumbers(){
+        return InstanceIterator.of(getExtraLines(), DebugLineNumber.class);
+    }
+    public boolean removeDebugElement(DebugElement element){
+        DebugSequence debugSequence = getDebugSequence();
+        if(debugSequence != null){
+            return debugSequence.remove(element);
+        }
+        return false;
+    }
+    public Iterator<DebugElement> getDebugElements(){
+        return InstanceIterator.of(getExtraLines(), DebugElement.class);
+    }
     public Iterator<ExtraLine> getExtraLines(){
         return this.extraLineList.iterator();
+    }
+    public<T1> Iterator<T1> getExtraLines(Class<T1> instance){
+        return this.extraLineList.iterator(instance);
     }
     public void clearExtraLines() {
         extraLineList = ExtraLineList.EMPTY;
@@ -145,6 +219,18 @@ public class Ins extends DexContainerItem implements SmaliFormat {
         clearExtraLines();
     }
 
+    public void replaceKeys(Key search, Key replace){
+
+    }
+    public Iterator<IdItem> usedIds(){
+        return EmptyIterator.of();
+    }
+    public void merge(Ins ins){
+
+    }
+    public void fromSmali(SmaliInstruction smaliInstruction) throws IOException {
+
+    }
     @Override
     public final void append(SmaliWriter writer) throws IOException {
         appendExtraLines(writer);
@@ -154,6 +240,11 @@ public class Ins extends DexContainerItem implements SmaliFormat {
         writer.newLine();
         writer.append(getOpcode().getName());
         writer.append(' ');
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        return obj == this;
     }
     @Override
     public String toString() {
@@ -166,5 +257,12 @@ public class Ins extends DexContainerItem implements SmaliFormat {
         } catch (Throwable exception) {
             return exception.toString();
         }
+    }
+    static int toSigned(int unsigned, int width){
+        int half = width / 2;
+        if(unsigned <= half){
+            return unsigned;
+        }
+        return unsigned - width - 1;
     }
 }
